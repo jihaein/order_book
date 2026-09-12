@@ -131,7 +131,79 @@ class Fill:
     price: float    #resting order's price
     quantity: int
     taker_side: Side #side of the incoming order
-    resting_id: int 
-    incoming_id: int
+    resting_id: int   
+    incoming_id: int # matched order with the resting_id
     sequence: int  # 몇번째 fill 인지
+
+@dataclass
+class ExecutionReport:
+    order_id: int
+    status: OrderStatus 
+    fills: list[Fill] # all trade related to this order
+    filled_qty: int
+    open_qty: int 
+    resting_price: float | None
+
+    @property 
+    def notional(self) -> float: # total value traded
+        return sum(f.price * f.quantity for f in self.fills)
+    
+    @property
+    def average_price(self) -> float | None:
+        return None if self.filled_qty == 0 else self.notional / self.filled_qty
+    
+
+class RestingQueue: 
+    
+    def __init__(self, ticks: int, price: float) -> None:
+        self.ticks = ticks
+        self.price = price
+        # INTERNAL DATA!!!!!
+        self._orders: OrderedDict[int, Order] = OrderedDict() 
+        self._depth: int=0 # total remaining quantity at this price
+
+    @property
+    def depth(self) -> int:
+        return self._depth # O(1)
+    
+    def head(self) -> Order | None : # keeps track of oldest order / O(1)
+        if not self._orders:
+            return None
+        return next(iter(self._orders.values()))
+
+    def __len__(self) -> int: 
+        return len(self._orders)
+
+    def __bool__(self) -> bool:
+        return len(self._orders) > 0
+    
+    def orders(self) -> Iterator[Order]:
+        yield from self._orders.values()
+
+    def join(self, order: Order) -> None:
+        self._orders[order.order_id] = order 
+        self._depth += order.open_qty
+
+    def fill_head(self, quantity: int) -> tuple[Order, int]:
+        if len(self._orders) == 0:
+            raise RuntimeError("Queue가 비었습니다.")
+        order = self.head()
+        filled = min(quantity, order.open_qty)
+        order.open_qty -= filled
+        self._depth -= filled
+
+        # now the order has been fulfilled -> should be deleted
+        if order.open_qty == 0:
+            del self._orders[order.order_id]
+        return order, filled
+        
+    def withdraw(self, order_id: int) -> Order | None:
+        order = self._orders.get(order_id)
+        if order is None:
+            return None
+        self._depth -= order.open_qty
+        del self._orders[order_id]
+        return order
+
+
 

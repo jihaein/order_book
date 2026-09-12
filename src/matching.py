@@ -154,7 +154,7 @@ class ExecutionReport:
     
 
 class RestingQueue: 
-    
+
     def __init__(self, ticks: int, price: float) -> None:
         self.ticks = ticks
         self.price = price
@@ -184,8 +184,9 @@ class RestingQueue:
         self._orders[order.order_id] = order 
         self._depth += order.open_qty
 
+    # trading against the oldest order
     def fill_head(self, quantity: int) -> tuple[Order, int]:
-        if len(self._orders) == 0:
+        if not self._orders:
             raise RuntimeError("Queue가 비었습니다.")
         order = self.head()
         filled = min(quantity, order.open_qty)
@@ -196,7 +197,8 @@ class RestingQueue:
         if order.open_qty == 0:
             del self._orders[order.order_id]
         return order, filled
-        
+    
+    # cancelling an order
     def withdraw(self, order_id: int) -> Order | None:
         order = self._orders.get(order_id)
         if order is None:
@@ -204,6 +206,78 @@ class RestingQueue:
         self._depth -= order.open_qty
         del self._orders[order_id]
         return order
+    
 
+class BookSide:
 
+    def __init__(self, side: Side, scale: TickScale) -> None:
+        self.side = side
+        self.scale = scale
+        self._levels: SortedDict[int, RestingQueue] = SortedDict()
+    
+    @property
+    def _best_index(self) -> int:
+        # returns last key for bid (best bid => highest price)
+        # returns first key for ask (best ask => lowest price)
+        return -1 if self.side is Side.BID else 0
 
+    # returns the most aggressive price level (as tick)
+    def best_ticks(self) -> int | None:
+        if not self._levels:
+            return None
+        return self._levels.keys()[self._best_index]
+    
+    # returns the most aggressive price level (as price)
+    def best_price(self) -> float | None: 
+        ticks = self.best_ticks()
+        if ticks is None:  
+            return None
+        return self.scale.to_price(ticks)
+    
+    # RestingQueue at the best price 
+    def top(self) -> RestingQueue | None: 
+        if not self._levels: 
+            return None
+        return self._levels.values()[self._best_index]
+
+    def __bool__(self) -> bool:
+        return len(self._levels) > 0
+
+    def accepts(self, incoming_ticks: int | None) -> bool:
+        if not self: 
+            return False
+        
+        # market order accepts any price 
+        if incoming_ticks is None:
+            return True
+        
+        best = self.best_ticks()
+
+        # If this is ask book, incoming order must be bid
+        if self.side is Side.ASK:
+            return incoming_ticks >= best
+        # if this is bid book, incoming order must be ask
+        else: 
+            return incoming_ticks <= best
+    
+    # fetch queue at ticks
+    def level(self, ticks: int, create: bool = False) -> RestingQueue | None:
+        level = self._levels.get(ticks)
+
+        if level is not None:
+            return level
+        
+        if not create:
+            return None
+        
+        level = RestingQueue(ticks=ticks, price=self.scale.to.price(ticks))
+        self._levels[ticks] = level
+        return level
+    
+    # if the level at ticks exists, but no order exists, delete the key
+    def discard_if_empty(self, ticks: int) -> None:
+        level = self._levels.get(ticks) 
+        if level is not None and not level: 
+            del self._levels[ticks]
+
+    

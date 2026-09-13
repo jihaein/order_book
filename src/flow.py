@@ -54,3 +54,8 @@ class Agent(Protocol):
 class QuotePoster:
     def act(self, ctx) -> list[Fill]:
         return
+    
+
+class FlowGenerator:
+    def __init__(self):
+        return

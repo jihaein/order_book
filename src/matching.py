@@ -407,6 +407,8 @@ class MatchingEngine:
         resting_price: float | None
         """
 
+        fills = self._sweep(order)
+
         if not order.is_done:
             self._post(order)
 
@@ -421,7 +423,7 @@ class MatchingEngine:
         return ExecutionReport(
             order_id = order.order_id,
             status=status_er,
-            fills= self._sweep(order),
+            fills = fills,
             filled_qty = order.filled_qty,
             open_qty = order.open_qty,
             resting_price=(

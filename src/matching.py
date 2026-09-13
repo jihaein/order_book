@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from collections import OrderedDict
 from sortedcontainers import SortedDict
 from typing import Protocol
-from itertools import count
+from itertools import count, islice
 from typing import Iterable, Iterator, Optional
 
 
@@ -153,6 +153,7 @@ class ExecutionReport:
         return None if self.filled_qty == 0 else self.notional / self.filled_qty
     
 
+
 class RestingQueue: 
 
     def __init__(self, ticks: int, price: float) -> None:
@@ -208,6 +209,7 @@ class RestingQueue:
         return order
     
 
+
 class BookSide:
 
     def __init__(self, side: Side, scale: TickScale) -> None:
@@ -246,13 +248,10 @@ class BookSide:
     def accepts(self, incoming_ticks: int | None) -> bool:
         if not self: 
             return False
-        
         # market order accepts any price 
         if incoming_ticks is None:
             return True
-        
         best = self.best_ticks()
-
         # If this is ask book, incoming order must be bid
         if self.side is Side.ASK:
             return incoming_ticks >= best
@@ -263,13 +262,10 @@ class BookSide:
     # fetch queue at ticks
     def level(self, ticks: int, create: bool = False) -> RestingQueue | None:
         level = self._levels.get(ticks)
-
         if level is not None:
             return level
-        
         if not create:
             return None
-        
         level = RestingQueue(ticks=ticks, price=self.scale.to.price(ticks))
         self._levels[ticks] = level
         return level
@@ -280,4 +276,32 @@ class BookSide:
         if level is not None and not level: 
             del self._levels[ticks]
 
+
+    # helper for yielding aggressive -> least aggressive for both BID and ASK
+    def aggressive_first(self) -> Iterator[RestingQueue]:
+        if self._best_index == -1:
+            yield from reversed(self._levels.values())
+        else:
+            yield from self._levels.values()
+
+    # orders most aggressive to least (bid: highest price / ask: lowest price)
+    def ladder(self, depth: int | None = None) -> list[tuple[float, int]]:
+        levels = self._levels_aggressive_first()
+        if depth is not None: 
+            levels = islice(levels, depth)
+        return [(level.price, level.depth) for level in levels]
     
+    # yields all resting order in (price, then time) order. (aggressive first)
+    def resting(self) -> Iterator[Order]:
+        for level in self._levels_aggressive_first():
+            yield from level.orders()
+
+    # sum of depths across all levels
+    def open_interest(self) -> int:
+        return sum(level.depth for level in self._levels.values())
+    
+    # drop every level
+    def clear(self) -> None:
+        self._levels.clear()
+
+

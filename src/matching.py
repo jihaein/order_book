@@ -100,7 +100,7 @@ class TickScale:
         return int(round(price / self.size))
     
     def to_price(self, price: float) -> float:
-        return round(price * self.size, 2)
+        return round(price * self.size, 10)
     
     def snap(self, price: float) -> float:
         return self.to_price(self.to_ticks(price))
@@ -266,7 +266,7 @@ class BookSide:
             return level
         if not create:
             return None
-        level = RestingQueue(ticks=ticks, price=self.scale.to.price(ticks))
+        level = RestingQueue(ticks=ticks, price=self.scale.to_price(ticks))
         self._levels[ticks] = level
         return level
     
@@ -278,7 +278,7 @@ class BookSide:
 
 
     # helper for yielding aggressive -> least aggressive for both BID and ASK
-    def aggressive_first(self) -> Iterator[RestingQueue]:
+    def _levels_aggressive_first(self) -> Iterator[RestingQueue]:
         if self._best_index == -1:
             yield from reversed(self._levels.values())
         else:
@@ -305,3 +305,147 @@ class BookSide:
         self._levels.clear()
 
 
+class MatchingEngine:
+    
+    def __init__(self, scale: TickScale | None = None) -> None:
+        self.scale = scale or TickScale()
+        self.bids = BookSide(Side.BID, self.scale)
+        self.asks = BookSide(Side.ASK, self.scale)
+        self._index: dict[int, Order] = {} # resting orders by id
+        self._next_id = count(1)
+        self._next_arrival = count(1)
+        self._next_seq = count(1)
+
+    def side(self, side: Side) -> BookSide:
+        return self.bids if side is Side.BID else self.asks
+    
+    def best_bid(self) -> float | None:
+        return self.bids.best_price()
+    
+    def best_ask(self) -> float | None:
+        return self.asks.best_price()
+    
+    def spread(self) -> float | None:
+        if self.best_bid() is None or self.best_ask() is None:
+            return None
+        return round((self.best_ask() - self.best_bid()), 10)
+    
+    def mid(self) -> float | None:
+        if self.best_bid() is None or self.best_ask() is None:
+            return None
+        return round(((self.best_ask() + self.best_bid())/2), 10)
+    
+    # thin pass through to BookSide ladder
+    def ladder(self, side: Side, depth: int | None = None) -> list[tuple[float, int]]:
+        return self.side(side).ladder(depth)
+    
+    def find(self, order_id: int) -> Order | None:
+        return self._index.get(order_id)
+    
+    def __contains__(self, order_id: int) -> bool:
+        return self.find(order_id) is not None
+    
+    # also a thin pass through to BookSide 
+    def resting_orders(self, side: Side) -> Iterator[Order]:
+        return self.side(side).resting()
+    
+    def top_of_book(self, depth: int=10) -> dict:
+        top = {
+            "bids": self.ladder(Side.BID, depth),
+            "asks": self.ladder(Side.ASK, depth), 
+            "best_bid": self.best_bid(),
+            "best_ask": self.best_ask(),
+            "spread": self.spread(),
+            "mid": self.mid()
+        }
+        return top
+    
+    def reset(self) -> None:
+        self.bids.clear()
+        self.asks.clear()
+        self._index.clear()
+
+    def place_limit(
+            self, 
+            side: Side, 
+            price: float, 
+            quantity: int, 
+            actor: str="flow") -> ExecutionReport:
+       
+        if quantity <= 0: raise ValueError("quantity가 0보다 커야합니다.")
+
+        """
+        <ORDER CLASS REFERENCE>
+        order_id: int
+        side: Side
+        order_type: OrderType
+        original_qty: int   #submitted size (static)
+        open_qty: int       # unfilled size
+        limit_ticks: int | None = None  # ticks / None only for market order
+        arrival: int=0  # time tick (?)
+        actor: str="flow"
+        """
+
+        order = Order(
+            order_id = next(self._next_id),
+            side = side,
+            order_type = OrderType.LIMIT,
+            original_qty = quantity,
+            open_qty = quantity,
+            limit_ticks = self.scale.to_ticks(price), 
+            arrival = next(self._next_arrival),
+            actor=actor
+        )
+
+        """
+        <EXECUTIONREPORT CLASS REFERENCE>
+        order_id: int
+        status: OrderStatus 
+        fills: list[Fill] # all trade related to this order
+        filled_qty: int
+        open_qty: int 
+        resting_price: float | None
+        """
+
+        if not order.is_done:
+            self._post(order)
+
+        if order.open_qty == 0:
+            status_er = OrderStatus.FILLED
+        elif order.open_qty == order.original_qty:
+            status_er = OrderStatus.RESTING
+        else:
+            status_er = OrderStatus.PARTIAL
+        
+
+        return ExecutionReport(
+            order_id = order.order_id,
+            status=status_er,
+            fills= self._sweep(order),
+            filled_qty = order.filled_qty,
+            open_qty = order.open_qty,
+            resting_price=(
+                self.scale.to_price(order.limit_ticks)
+                if order.open_qty > 0
+                else None
+            )
+        )
+    
+    def place_market(self, side: Side, quantity: int, actor: str="flow") -> ExecutionReport:
+        return
+    
+    def _post(self, order: Order) -> None:
+        return
+    
+    def pull(self, order_id: int) -> Order | None:
+        return
+    
+    def _sweep(self, incoming: Order) -> list[Fill]:
+        return
+
+
+
+
+
+
+        

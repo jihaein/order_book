@@ -7,7 +7,6 @@ from typing import Protocol
 from itertools import count, islice
 from typing import Iterable, Iterator, Optional
 
-
 """
 For coworking developers, this is how you use the imported packages
 
@@ -365,6 +364,7 @@ class MatchingEngine:
         self.asks.clear()
         self._index.clear()
 
+    # placing limit order
     def place_limit(
             self, 
             side: Side, 
@@ -431,17 +431,93 @@ class MatchingEngine:
             )
         )
     
-    def place_market(self, side: Side, quantity: int, actor: str="flow") -> ExecutionReport:
-        return
+    # placing market order ( NO RESTING !!!)
+    def place_market(
+            self, 
+            side: Side, 
+            quantity: int, 
+            actor: str="flow") -> ExecutionReport:
+        if quantity <= 0: raise ValueError("quantity가 0보다 커야합니다.")
+
+        order = Order(
+        order_id = next(self._next_id),
+        side = side,
+        order_type = OrderType.MARKET,
+        original_qty = quantity,
+        open_qty = quantity,
+        limit_ticks = None, 
+        arrival = next(self._next_arrival),
+        actor=actor)
+
+        fills = self._sweep(order)
+
+        if order.open_qty == 0:
+            status_er = OrderStatus.FILLED
+        else:
+            status_er = OrderStatus.EXPIRED
+        
+        return ExecutionReport(
+            order_id = order.order_id,
+            status=status_er,
+            fills= fills,
+            filled_qty = order.filled_qty,
+            open_qty = order.open_qty,
+            resting_price= None
+        )
     
     def _post(self, order: Order) -> None:
-        return
+        book = self.side(order.side)
+        level= book.level(order.limit_ticks, create=True)
+        level.join(order)
+        self._index[order.order_id] = order
     
+    # cancelling a resting order (most likely by the trader ??)
     def pull(self, order_id: int) -> Order | None:
-        return
+        order = self._index.pop(order_id, None)
+        if order is None:
+            return None
+        book = self.side(order.side)
+        level = book.level(order.limit_ticks)
+
+        if level is not None:
+            level.withdraw(order_id)
+            book.discard_if_empty(order.limit_ticks)
+        return order
     
+    # takes incoming order and match with best bid/ask
     def _sweep(self, incoming: Order) -> list[Fill]:
-        return
+        contra = self.side(incoming.side.contra)
+        fills = []
+
+        # while open quantity is left, keep trading
+        while incoming.open_qty > 0 and contra:
+
+            # price priority check first
+            if not contra.accepts(incoming.limit_ticks):
+                break # trade stops
+            ticks = contra.best_ticks()
+            level = contra.top()
+
+            # time priority
+            while incoming.open_qty > 0 and level:
+                resting, qty = level.fill_head(incoming.open_qty)
+                incoming.open_qty -= qty
+
+                fills.append(Fill(
+                    price = level.price,
+                    quantity = qty,
+                    taker_side = incoming.side,
+                    resting_id = resting.order_id,
+                    incoming_id = incoming.order_id,
+                    sequence = next(self._next_seq)
+                ))
+
+                if resting.is_done:
+                    self._index.pop(resting.order_id, None)
+
+            contra.discard_if_empty(ticks)
+
+        return fills
 
 
 

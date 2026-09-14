@@ -1,9 +1,9 @@
+from __future__ import annotations
 from matching import Fill, Side, MatchingEngine
 import random
 from dataclasses import dataclass, field
 import math
 from typing import Protocol
-from __future__ import annotations
 
 @dataclass
 class FlowSettings:
@@ -54,8 +54,10 @@ class FairValue:
         self.drift = drift 
         self.vol = vol
         self.rng = rng # random number generator
+
     def advance(self) -> float:
         self.value = max(0.01, self.value + self.drift + self.rng.gauss(0, self.vol))
+        return self.value
 
 class Agent(Protocol): 
     def act(self, ctx: "FlowGenerator") -> list[Fill]: ...
@@ -76,23 +78,21 @@ class QuotePoster:
         trades: list[Fill] = []
 
         n = poisson(ctx.rng, settings.quote_intensity)
-        tick = ctx.tick_size
+        tick = settings.tick_size
 
         # choosing the side
         for _ in range(n):
             side = ctx.rng.choice((Side.BID, Side.ASK))
             distance = ctx.rng.expovariate(1/ settings.mean_distance_ticks)
-            urgency = ctx.rng.random() < ctx.settings.cross_probability
-            sign = -1.0 if urgency else 1.0
-            if side is Side.BID:
-                price = settings.anchor - sign * settings.mean_distance_ticks * tick
-                price = max(tick, price)
-                order, t = ctx.engine.bids()
+            crosses = ctx.rng.random() < ctx.settings.cross_probability
 
-            else:
-                price = settings.anchor + sign * settings.mean_distance_ticks * tick
-                price = max(tick, price)
-                order, t = ctx.engine.asks()
+            # price should be calculated here
+            quantity = ctx.lot()
+            report = ctx.engine.place_limit(side, price, quantity)
+            
+            sign = -1.0 if crosses else 1.0
+            price = ctx.fair_value.advance()
+            
 
         return
     
@@ -108,13 +108,17 @@ class QuotePuller:
 
 class FlowGenerator:
     def __init__(self, engine: MatchingEngine, settings: FlowSettings | None = None) -> None:
-        self.engine = MatchingEngine()
-        self.settings = FlowSettings()
-        self.fair_value = FairValue(settings.anchor, settings.drift, settings.vol, self.rng)
-        self.owned: set[int] = []
+        self.engine = engine
+        self.settings = settings if settings is not None else  FlowSettings()
+        self.rng = random.Random(self.settings.seed)
+        self.fair_value = FairValue(
+            settings.anchor, 
+            settings.drift, 
+            settings.vol, 
+            self.rng)
+        self.owned: set[int] = set()
         self.agents: list[Agent] = [QuotePuller(), QuotePoster(), LiquidityTaker()]
         self.ticks_elapsed = 0
-        return
     
     def lot(self, scale: float = 1.0) -> int:
         return

@@ -208,7 +208,7 @@ class RestingQueue:
         return order
     
 
-
+# keeps track of methods that are "side sensitive". So things that would differ depending on BID / ASK
 class BookSide:
 
     def __init__(self, side: Side, scale: TickScale) -> None:

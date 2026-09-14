@@ -62,6 +62,7 @@ class FairValue:
 class Agent(Protocol): 
     def act(self, ctx: "FlowGenerator") -> list[Fill]: ...
 
+#  agent places LO
 class QuotePoster:
     def act(self, ctx: "FlowGenerator") -> list[Fill]:
         """
@@ -84,28 +85,61 @@ class QuotePoster:
         for _ in range(n):
             side = ctx.rng.choice((Side.BID, Side.ASK))
             distance = ctx.rng.expovariate(1/ settings.mean_distance_ticks)
-            crosses = ctx.rng.random() < ctx.settings.cross_probability
-
-            # price should be calculated here
+            crosses = (ctx.rng.random() < ctx.settings.cross_probability)
             quantity = ctx.lot()
+
+            # price calculation only happens when bid and ask crosses
+            fair = ctx.fair_value.value 
+            if crosses: 
+                if side == Side.BID:
+                    price = fair + distance * tick
+                else:
+                    price = fair - distance * tick
+
             report = ctx.engine.place_limit(side, price, quantity)
-            
-            sign = -1.0 if crosses else 1.0
-            price = ctx.fair_value.advance()
-            
+            trades.extend(report.fills)
 
-        return
+            if report.open_qty > 0:
+                ctx.owned.add(report.order_id)
+
+        return trades
     
+#  agent places MO
 class LiquidityTaker:
-    def act(self, ctx) -> list[Fill]:
-        return
+    def act(self, ctx: "FlowGenerator") -> list[Fill]:
+
+        settings = ctx.settings
+        trades: list[Fill] = []
+
+        n = poisson(ctx.rng, settings.take_intensity)
+        
+        for _ in range (n):
+            side = ctx.rng.choice((Side.BID, Side.ASK))
+            # only send if there is cross
+            far = ctx.engine.best_ask() if side is Side.BID else ctx.engine.best_bid()
+            if far is None:
+                continue
+            quantity = ctx.lot()
+            
+            report = ctx.engine.place_market(side, quantity)
+            trades.extend(report.fills)
+
+        return trades
     
-
+# agent cancels LO 
 class QuotePuller:
-    def act(self, ctx) -> list[Fill]:
-        return
-
-
+    def act(self, ctx: "FlowGenerator") -> list[Fill]:
+        settings = ctx.settings
+        n = poisson(ctx.rng, settings.pull_intensity)
+        for _ in range(n):
+            if not ctx.owned:
+                break 
+            oid = ctx.rng.choice(tuple(ctx.owned))
+            ctx.owned.discard(oid)
+            ctx.engine.pull(oid)
+        return []
+    
+# 1 step -> 3 agents places each order
 class FlowGenerator:
     def __init__(self, engine: MatchingEngine, settings: FlowSettings | None = None) -> None:
         self.engine = engine
@@ -121,9 +155,11 @@ class FlowGenerator:
         self.ticks_elapsed = 0
     
     def lot(self, scale: float = 1.0) -> int:
-        return
+        lot = round (self.rng.randint(self.settings.lot_min, self.settings.lot_max) * scale, 10)
+        return lot
     
     def prime(self) -> None:
+        
         return
     
     def advance(self, ticks: int=1) -> list[Fill]: 

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ORDER BOOK SIM-X</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top-bar">
+    <h1 class="brand">ORDER BOOK SIM-X <span class="sub">perpetual</span></h1>
+    <div class="last-pill">LAST <span id="last-print">—</span></div>
+  </header>
+
+  <main class="workspace">
+    <section class="dom-panel" aria-label="Depth of market">
+      <table class="dom" id="dom">
+        <thead>
+          <tr>
+            <th>Bid Size</th>
+            <th>Price</th>
+            <th>Ask Size</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="chart-panel" aria-label="Cumulative depth">
+      <canvas id="depth-chart" width="640" height="420"></canvas>
+      <div class="chart-legend">
+        <span class="leg bid">bids</span>
+        <span class="leg ask">asks</span>
+        <span class="leg mine">your orders</span>
+      </div>
+      <details class="chart-help">
+        <summary>How to read this graph</summary>
+        <p><strong>Left / green:</strong> buy orders below the midpoint. <strong>Right / red:</strong> sell orders above it. Moving away from the midpoint, each step gets taller because it adds all available quantity up to that price.</p>
+        <p>The horizontal axis is <strong>price</strong>; height is <strong>cumulative quantity</strong>, not a price forecast. The dashed gold line is the midpoint between the best bid and best ask. Blue lines mark your resting limit orders.</p>
+      </details>
+    </section>
+
+    <aside class="side-panel">
+      <div class="prints-ticker" id="prints-ticker"></div>
+
+      <div class="card">
+        <h2 class="card-title">Manual Order Entry</h2>
+        <form id="order-form">
+          <div class="seg-row">
+            <span class="seg-label">Side</span>
+            <div class="seg" data-name="side">
+              <label><input type="radio" name="side" value="bid" checked /> Buy</label>
+              <label><input type="radio" name="side" value="ask" /> Sell</label>
+            </div>
+          </div>
+          <div class="seg-row">
+            <span class="seg-label">Type</span>
+            <div class="seg" data-name="order_type">
+              <label><input type="radio" name="order_type" value="limit" checked /> Limit</label>
+              <label><input type="radio" name="order_type" value="market" /> Market</label>
+            </div>
+          </div>
+          <div class="field-row">
+            <label>Price <input name="price" type="number" step="0.01" value="100" /></label>
+            <label>Size <input name="quantity" type="number" min="1" value="10" /></label>
+          </div>
+          <button type="submit" class="btn primary">Submit Order</button>
+        </form>
+        <p id="order-status" class="status" hidden></p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Your Resting Orders</h2>
+        <table class="mine-table" id="my-orders">
+          <thead>
+            <tr><th></th><th>Id</th><th>Side</th><th>Price</th><th>Qty</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <button type="button" class="btn" id="cancel-selected" disabled>Cancel Selected</button>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Simulation Controls</h2>
+        <div class="sim-buttons">
+          <button type="button" class="btn primary" id="toggle-flow">Pause Flow</button>
+          <button type="button" class="btn" id="restart">Reset</button>
+        </div>
+        <label class="slider-row">Speed
+          <input type="range" id="tempo" min="1" max="20" value="4" />
+          <span id="tempo-val">4</span>
+        </label>
+        <label class="slider-row">Aggressiveness
+          <input type="range" id="urgency" min="0" max="5" value="0" />
+          <span id="urgency-val">0</span>
+        </label>
+        <details class="help">
+          <summary>How matching works (rules &amp; big-O)</summary>
+          <p>Limit orders rest in price-time priority (FIFO per level). Incoming orders sweep the contra side best-first; partial fills leave remainder resting. Market orders take liquidity until filled or the book is empty (remainder expires). Book levels are O(log L) per side; each match is O(1) at the touch.</p>
+        </details>
+      </div>
+    </aside>
+  </main>
+
+  <dialog id="ack-dialog" class="ack-dialog">
+    <form method="dialog">
+      <h3>Price band</h3>
+      <p id="ack-message"></p>
+      <p class="ack-hint">Submit at the collared price?</p>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="confirm" class="btn primary">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

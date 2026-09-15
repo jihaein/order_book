@@ -1,16 +1,19 @@
 from __future__ import annotations
-from matching import Fill, Side, MatchingEngine
+from matching import Fill, Side, MatchingEngine, BookSide, Order
 import random
 from dataclasses import dataclass, field
 import math
 from typing import Protocol
+
+# DISCLAIMER: Market Simulation logic is originally built by @romanmichaelpaolucci
+# variables and functions are added/altered to improve compatibility with matching.py
 
 @dataclass
 class FlowSettings:
     anchor: float = 100.0 # fair_value
     tick_size: float = 0.01
 
-    drift: float = 0.0 # drift
+    drift: float = 0.0 # driftd
     vol: float = 0.05 # sigma
 
     # Flow intensities
@@ -23,8 +26,8 @@ class FlowSettings:
     cross_probability: float = 0.15
 
     # order sizes
-    lot_min: float = 1
-    lot_max: float = 12
+    lot_min: int = 1
+    lot_max: int = 12
 
     # aggressiveness
     urgency: float = 1.0
@@ -80,7 +83,7 @@ class QuotePoster:
 
         n = poisson(ctx.rng, settings.quote_intensity)
         tick = settings.tick_size
-
+ 
         # choosing the side
         for _ in range(n):
             side = ctx.rng.choice((Side.BID, Side.ASK))
@@ -95,6 +98,11 @@ class QuotePoster:
                     price = fair + distance * tick
                 else:
                     price = fair - distance * tick
+            else:
+                if side == Side.BID:
+                    price = fair - distance * tick
+                else:
+                    price = fair + distance * tick
 
             report = ctx.engine.place_limit(side, price, quantity)
             trades.extend(report.fills)
@@ -116,8 +124,8 @@ class LiquidityTaker:
         for _ in range (n):
             side = ctx.rng.choice((Side.BID, Side.ASK))
             # only send if there is cross
-            far = ctx.engine.best_ask() if side is Side.BID else ctx.engine.best_bid()
-            if far is None:
+            opposite_best = ctx.engine.best_ask() if side is Side.BID else ctx.engine.best_bid()
+            if opposite_best is None:
                 continue
             quantity = ctx.lot()
             
@@ -143,24 +151,25 @@ class QuotePuller:
 class FlowGenerator:
     def __init__(self, engine: MatchingEngine, settings: FlowSettings | None = None) -> None:
         self.engine = engine
-        self.settings = settings if settings is not None else  FlowSettings()
+        self.settings = settings if settings is not None else FlowSettings()
         self.rng = random.Random(self.settings.seed)
         self.fair_value = FairValue(
-            settings.anchor, 
-            settings.drift, 
-            settings.vol, 
+            self.settings.anchor, 
+            self.settings.drift, 
+            self.settings.vol, 
             self.rng)
         self.owned: set[int] = set()
         self.agents: list[Agent] = [QuotePuller(), QuotePoster(), LiquidityTaker()]
         self.ticks_elapsed = 0
     
     def lot(self, scale: float = 1.0) -> int:
-        lot = round (self.rng.randint(self.settings.lot_min, self.settings.lot_max) * scale, 10)
-        return lot
-    
-    def prime(self) -> None:
+        return max(1, round( self.rng.randint( self.settings.lot_min, self.settings.lot_max,) * scale))
         
-        return
-    
-    def advance(self, ticks: int=1) -> list[Fill]: 
-        return
+    def advance(self, ticks: int=1) -> list[Fill]:
+        trades: list[Fill] = []
+        for _ in range(ticks):
+            self.fair_value.advance()
+            for agent in self.agents:
+                trades.extend(agent.act(self))
+            self.ticks_elapsed += 1
+        return trades

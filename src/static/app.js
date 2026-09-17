@@ -263,6 +263,9 @@ function renderMyOrders(orders) {
       document.getElementById("cancel-selected").disabled = false;
     });
   });
+
+  
+
 }
 
 function syncControls(s) {

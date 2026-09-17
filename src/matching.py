@@ -125,6 +125,7 @@ class Order:
     def is_done(self) -> bool:
         return self.open_qty <= 0
     
+
 @dataclass(frozen=True)
 class Fill:
     price: float    #resting order's price
@@ -150,7 +151,7 @@ class ExecutionReport:
     @property
     def average_price(self) -> float | None:
         return None if self.filled_qty == 0 else self.notional / self.filled_qty
-    
+
 
 
 class RestingQueue: 
@@ -524,6 +525,3 @@ class MatchingEngine:
 
 
 
-
-
-        

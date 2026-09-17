@@ -7,7 +7,7 @@ The goal of this project is to build a simplified exchange environment from scra
 
 Current features are:
 - limit order book 
-- 1) price 2) time priority matching
+- price then time priority matching
 - limit order & market order
 - partial fills & LO cancellation
 - random walk fair value

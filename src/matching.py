@@ -85,6 +85,7 @@ class OrderStatus(Enum):
     RESTING = "resting"     # nothing traded (all rests)
     EXPIRED = "expired"     # market order that ran out of book (remainder discarded)
     REJECTED = "rejected"   # does NOT enter the book (error)
+    CANCELLED = "cancelled" # cancelled after entering the limit orderbook
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ class Order:
     limit_ticks: int | None = None  # ticks / None only for market order
     arrival: int=0  # time tick (?)
     actor: str="flow"
+    status: OrderStatus
 
     @property
     def filled_qty(self) -> int:
@@ -315,6 +317,7 @@ class MatchingEngine:
         self._next_id = count(1)
         self._next_arrival = count(1)
         self._next_seq = count(1)
+        self._order_history: dict[int, Order] = dict() # this is used for 계약성립 history
 
     def side(self, side: Side) -> BookSide:
         return self.bids if side is Side.BID else self.asks
@@ -398,15 +401,9 @@ class MatchingEngine:
             actor=actor
         )
 
-        """
-        <EXECUTIONREPORT CLASS REFERENCE>
-        order_id: int
-        status: OrderStatus 
-        fills: list[Fill] # all trade related to this order
-        filled_qty: int
-        open_qty: int 
-        resting_price: float | None
-        """
+        # register this order into order_history
+        
+
 
         fills = self._sweep(order)
 

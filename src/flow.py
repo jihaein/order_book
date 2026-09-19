@@ -75,7 +75,7 @@ class QuotePoster:
         -> choose size 
         -> send them to MatchingEngine
         -> remember any order that stays resting
-        -> return any fills that happened
+        -> return fills that happened
         """
         settings = ctx.settings
 

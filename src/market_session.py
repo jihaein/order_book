@@ -18,7 +18,7 @@ class MarketSession:
         self.tempo: int = 4
         PRINT_HISTORY = 100
         self.prints = deque(maxlen=PRINT_HISTORY)
-        self.my_orders: set[int] = set()
+        self.my_orders: set[int] = set() # stores order_id
         self.last_print: float | None = None
         self.flow.advance()
 

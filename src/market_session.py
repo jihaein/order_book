@@ -11,7 +11,7 @@ class BandVerdict:
     reason: str = ""
 
 class MarketSession:
-    def __init__(self, scale: TickScale | None = None, seed: int | None = None) -> None:
+    def __init__(self, scale: TickScale | None = None, seed: int | None = None, initial_cash: float = 1_000_000.0) -> None:
         self.engine = MatchingEngine(scale)
         self.flow = FlowGenerator(self.engine, FlowSettings(seed=seed))
         self.live: bool = False
@@ -21,20 +21,79 @@ class MarketSession:
         self.my_orders: set[int] = set() # stores order_id
         self.last_print: float | None = None
         self.flow.advance()
+        # this is for inventory tracking
+        if initial_cash < 0:
+            raise ValueError("돈이 0보다 많아야 합니다.")
+        self.initial_cash = float(initial_cash)
+        self.cash = float(initial_cash)
+        self.inventory = 0
 
+
+    # Inventory tracking methods
+
+    # 1) updates inventory & cash according to buy / sell sign (pos / neg)
+    def _apply_user_execution(self, side: Side, price: float, quantity: int) -> None: 
+        signed_quantity = side.sign * quantity
+        self.inventory += signed_quantity
+        self.cash -= signed_quantity * price
+        return None
+    
+    # 2) if incoming / resting order belongs to user, apply execution 
+    def _account_for_fill(self, fill: Fill) -> None:
+        incoming_order = self.engine.find_order(fill.incoming_id)
+        if incoming_order.actor == "user":
+            self._apply_user_execution(
+                side = incoming_order.side,
+                price = fill.price,
+                quantity = fill.quantity
+            )
+
+        resting_order = self.engine.find_order(fill.resting_id)
+
+        if resting_order.actor == "user":
+            self._apply_user_execution(
+                side = resting_order.side,
+                price = fill.price,
+                quantity = fill.quantity
+            )
 
     def _record(self, fills: list[Fill]) -> None:
         record = {}
         for fill in fills:
+            self._account_for_fill(fill)
             print_data = {
                 "at": strftime("%H:%M:%S"),
                 "price": fill.price,
                 "quantity": fill.quantity,
                 "taker": fill.taker_side.value,
             }
-
             self.prints.appendleft(print_data)
             self.last_print = fill.price
+
+    # returns dictionary of portfolio consisting in:  initial cash, cash, inventory, mark price, inventory value, equity, pnl
+    def portfolio_snapshot(self):
+        # mark price
+        mark_price = self.anchor_price()
+
+        # inventory value
+        inventory_value = self.inventory * mark_price
+
+        # equity
+        equity = self.cash + inventory_value
+
+        # total mark to market p&l (profit and loss)
+        pnl = equity - self.initial_cash
+
+        return {
+            "initial_cash": self.initial_cash,
+            "cash": self.cash,
+            "inventory": self.inventory,
+            "mark_price": mark_price,
+            "inventory_value": inventory_value,
+            "equity": equity,
+            "pnl": pnl
+        }
+            
 
     def advance(self, ticks: int=1) -> None:
         if not self.live:
@@ -51,8 +110,11 @@ class MarketSession:
         self.prints.clear()
         self.my_orders.clear()
         self.last_print = None
+        self.cash = self.initial_cash
+        self.inventory = 0
         fills = self.flow.advance()
         self._record(fills)
+    
     
     def configure(self, live=None, tempo=None, urgency=None) -> None:
         if live is not None:
@@ -223,6 +285,8 @@ class MarketSession:
             "clock": {
                 "ticks": self.flow.ticks_elapsed,
             },
+
+            "portfolio": self.portfolio_snapshot(),
 
             "top": {
                 "best_bid": best_bid,

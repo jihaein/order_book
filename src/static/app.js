@@ -3,6 +3,15 @@ const fmt = (n) =>
   n == null ? "—" : Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtQty = (n) => (n == null ? "" : String(n));
+const fmtMoney = (n) =>
+  n == null
+    ? "—"
+    : Number(n).toLocaleString(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -287,6 +296,28 @@ function renderPrintsTicker(prints) {
     .join("");
 }
 
+function renderPortfolio(portfolio = {}) {
+  document.getElementById("portfolio-equity").textContent = fmtMoney(portfolio.equity);
+  document.getElementById("portfolio-cash").textContent = fmtMoney(portfolio.cash);
+  document.getElementById("portfolio-inventory").textContent = fmtQty(portfolio.inventory ?? 0);
+  document.getElementById("portfolio-mark").textContent = fmtMoney(portfolio.mark_price);
+  document.getElementById("portfolio-inventory-value").textContent = fmtMoney(portfolio.inventory_value);
+  document.getElementById("portfolio-initial-cash").textContent = fmtMoney(portfolio.initial_cash);
+
+  const pnlEl = document.getElementById("portfolio-pnl");
+  const pnl = Number(portfolio.pnl);
+  pnlEl.textContent = portfolio.pnl == null
+    ? "—"
+    : `${pnl > 0 ? "+" : ""}${fmtMoney(pnl)}`;
+  pnlEl.classList.toggle("positive", pnl > 0);
+  pnlEl.classList.toggle("negative", pnl < 0);
+
+  const inventoryEl = document.getElementById("portfolio-inventory");
+  const inventory = Number(portfolio.inventory);
+  inventoryEl.classList.toggle("positive", inventory > 0);
+  inventoryEl.classList.toggle("negative", inventory < 0);
+}
+
 function renderMyOrders(orders) {
   const tbody = document.querySelector("#my-orders tbody");
   tbody.innerHTML = "";
@@ -380,6 +411,7 @@ function renderSnapshot(s) {
   renderDom(book, top, activeOrders);
   drawDepthChart(book, top, activeOrders);
   renderPrintsTicker(s.prints);
+  renderPortfolio(s.portfolio);
   renderMyOrders(activeOrders);
   renderFinishedOrders(finishedOrders);
   syncControls(s);

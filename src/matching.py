@@ -134,7 +134,7 @@ class Fill:
     price: float    #resting order's price
     quantity: int
     taker_side: Side #side of the incoming order
-    resting_id: int   
+    resting_id: int 
     incoming_id: int # matched order with the resting_id
     sequence: int  # 몇번째 fill 인지
 

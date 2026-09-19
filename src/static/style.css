@@ -306,6 +306,73 @@ body.is-resizing-panel {
   letter-spacing: 0.06em;
 }
 
+.portfolio-card {
+  padding-bottom: 0.5rem;
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.portfolio-metric {
+  min-width: 0;
+  padding: 0.4rem 0.45rem;
+  background: #010409;
+}
+
+.portfolio-metric dt {
+  margin-bottom: 0.15rem;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.portfolio-metric dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portfolio-metric.portfolio-equity dd,
+.portfolio-metric.portfolio-pnl dd {
+  font-size: 12px;
+}
+
+.portfolio-metric dd.positive {
+  color: var(--bid);
+}
+
+.portfolio-metric dd.negative {
+  color: var(--ask);
+}
+
+.portfolio-basis {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.portfolio-basis span {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
 .seg-row {
   margin-bottom: 0.45rem;
 }

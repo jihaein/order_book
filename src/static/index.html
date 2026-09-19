@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ORDER BOOK SIM-X</title>
-  <link rel="stylesheet" href="/static/style.css?v=5" />
+  <link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body>
   <div id="file-warning" class="file-warning" hidden>
@@ -60,6 +60,37 @@
 
     <aside class="side-panel">
       <div class="prints-ticker" id="prints-ticker"></div>
+
+      <div class="card portfolio-card" aria-labelledby="portfolio-title">
+        <h2 class="card-title" id="portfolio-title">Your Portfolio</h2>
+        <dl class="portfolio-grid">
+          <div class="portfolio-metric portfolio-equity">
+            <dt>Equity</dt>
+            <dd id="portfolio-equity">—</dd>
+          </div>
+          <div class="portfolio-metric portfolio-pnl">
+            <dt>Total P&amp;L</dt>
+            <dd id="portfolio-pnl">—</dd>
+          </div>
+          <div class="portfolio-metric">
+            <dt>Cash</dt>
+            <dd id="portfolio-cash">—</dd>
+          </div>
+          <div class="portfolio-metric">
+            <dt>Inventory</dt>
+            <dd id="portfolio-inventory">—</dd>
+          </div>
+          <div class="portfolio-metric">
+            <dt>Mark Price</dt>
+            <dd id="portfolio-mark">—</dd>
+          </div>
+          <div class="portfolio-metric">
+            <dt>Inventory Value</dt>
+            <dd id="portfolio-inventory-value">—</dd>
+          </div>
+        </dl>
+        <p class="portfolio-basis">Starting cash <span id="portfolio-initial-cash">—</span></p>
+      </div>
 
       <div class="card">
         <h2 class="card-title">Manual Order Entry</h2>
@@ -150,6 +181,6 @@
       document.getElementById("file-warning").hidden = false;
     }
   </script>
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>

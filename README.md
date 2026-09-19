@@ -68,12 +68,23 @@ DISCLAIMER: Frontend design is entirely AI generated.
 
 ### Running the Project
 
-Activate the virtual environment: 
+Activate the virtual environment:
 ```bash
 source .venv/bin/activate
 ```
 
-Start the server:
+Start the application:
+```bash
+python src/app.py
+```
+
+Then open http://127.0.0.1:8000 in your browser.
+
+For automatic reload during development, use:
 ```bash
 PYTHONPATH=src uvicorn server:app --reload
 ```
+
+Do not open `src/static/index.html` directly with a `file://` URL. The page
+needs the local API server. The former Streamlit interface has been removed so
+all supported launch commands now use the same frontend.

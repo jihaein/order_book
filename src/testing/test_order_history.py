@@ -86,6 +86,8 @@ def test_market_session_keeps_user_history() -> None:
     initial_rows = session.snapshot()["my_orders"]
     initial_row = next(row for row in initial_rows if row["order_id"] == limit_id)
     assert initial_row["status"] == OrderStatus.RESTING.value
+    assert [row["order_id"] for row in session.snapshot()["my_active_orders"]] == [limit_id]
+    assert session.snapshot()["my_finished_orders"] == []
 
     assert session.pull_mine(limit_id) is True
     assert limit_id in session.my_orders, "Cancellation must not erase history ID"
@@ -93,6 +95,9 @@ def test_market_session_keeps_user_history() -> None:
     cancelled_rows = session.snapshot()["my_orders"]
     cancelled_row = next(row for row in cancelled_rows if row["order_id"] == limit_id)
     assert cancelled_row["status"] == OrderStatus.CANCELLED.value
+    assert session.snapshot()["my_active_orders"] == []
+    assert [row["order_id"] for row in session.snapshot()["my_finished_orders"]] == [limit_id]
+    assert session.cancellation_error(limit_id) == "order is already cancelled"
 
     market_result = session.submit(
         side=Side.BID,
@@ -110,12 +115,30 @@ def test_market_session_keeps_user_history() -> None:
         OrderStatus.FILLED.value,
         OrderStatus.EXPIRED.value,
     }
+    assert final_row["order_type"] == OrderType.MARKET.value
+    assert "original_quantity" in final_row
+    assert "filled_quantity" in final_row
+    assert "open_quantity" in final_row
+
+
+def test_low_sell_limit_returns_acknowledgement() -> None:
+    """A low sell price should be collared instead of crashing validation."""
+    session = MarketSession(seed=123)
+    result = session.submit(
+        side=Side.ASK,
+        order_type=OrderType.LIMIT,
+        quantity=1,
+        price=1.00,
+    )
+    assert result["outcome"] == "needs_acknowledgement"
+    assert result["collared_price"] > 1.00
 
 
 def main() -> None:
     tests = [
         test_matching_engine_lifecycle,
         test_market_session_keeps_user_history,
+        test_low_sell_limit_returns_acknowledgement,
     ]
 
     for test in tests:

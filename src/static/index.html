@@ -4,9 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ORDER BOOK SIM-X</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=5" />
 </head>
 <body>
+  <div id="file-warning" class="file-warning" hidden>
+    This app needs its local API server. Start it with
+    <code>PYTHONPATH=src uvicorn server:app --reload</code>, then open
+    <code>http://127.0.0.1:8000</code> instead of this file directly.
+  </div>
   <header class="top-bar">
     <h1 class="brand">ORDER BOOK SIM-X <span class="sub">perpetual</span></h1>
     <div class="last-pill">LAST <span id="last-print">—</span></div>
@@ -39,6 +44,19 @@
         <p>The horizontal axis is <strong>price</strong>; height is <strong>cumulative quantity</strong>, not a price forecast. The dashed gold line is the midpoint between the best bid and best ask. Blue lines mark your resting limit orders.</p>
       </details>
     </section>
+
+    <div
+      class="panel-resizer"
+      id="panel-resizer"
+      role="separator"
+      aria-label="Resize trading panel"
+      aria-orientation="vertical"
+      aria-valuemin="260"
+      aria-valuemax="520"
+      aria-valuenow="300"
+      tabindex="0"
+      title="Drag to resize the trading panel"
+    ></div>
 
     <aside class="side-panel">
       <div class="prints-ticker" id="prints-ticker"></div>
@@ -73,18 +91,24 @@
         <h2 class="card-title">Your Resting Orders</h2>
         <table class="mine-table" id="my-orders">
           <thead>
-            <tr><th></th><th>Id</th><th>Side</th><th>Price</th><th>Qty</th></tr>
+            <tr><th scope="col"></th><th scope="col">Id</th><th scope="col">Side</th><th scope="col">Price</th><th scope="col">Open</th><th scope="col">Status</th></tr>
           </thead>
           <tbody></tbody>
         </table>
         <button type="button" class="btn" id="cancel-selected" disabled>Cancel Selected</button>
       </div>
 
-      <div class="card"> 
+      <div class="card">
         <h2 class="card-title">Your Finished Orders</h2>
-        <table class="mine-table" id="my-orders"> 
-          <thead>
-            <tr><th></th><th>Id</th><th>Side</th><th>Price</th><th>Qty</th><th>Time</th>
+        <div class="table-scroll">
+          <table class="mine-table history-table" id="finished-orders">
+            <thead>
+              <tr><th scope="col">Id</th><th scope="col">Side</th><th scope="col">Type</th><th scope="col">Price</th><th scope="col">Filled</th><th scope="col">Status</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
 
       <div class="card">
         <h2 class="card-title">Simulation Controls</h2>
@@ -121,6 +145,11 @@
     </form>
   </dialog>
 
-  <script src="/static/app.js"></script>
+  <script>
+    if (window.location.protocol === "file:") {
+      document.getElementById("file-warning").hidden = false;
+    }
+  </script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

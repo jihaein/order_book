@@ -77,7 +77,6 @@ class MarketSession:
 
         if side is Side.BID and price > ceiling:
             pct_above = (price / ref-1) * 100
-            pct_below = (1 - price / ref) * 100
 
             return BandVerdict(
                 within=False,
@@ -86,6 +85,7 @@ class MarketSession:
             )
         
         if side is Side.ASK and price < floor:
+            pct_below = (1 - price / ref) * 100
             return BandVerdict(
                 within=False,
                 price=floor,
@@ -162,6 +162,18 @@ class MarketSession:
             return False
 
         return True
+
+    def cancellation_error(self, order_id: int) -> str | None:
+        """Explain why a user order cannot be cancelled, if applicable."""
+        if order_id not in self.my_orders:
+            return "order not found or not yours"
+
+        order = self.engine.find_order(order_id)
+        if order is None:
+            return "order not found"
+        if self.engine.find(order_id) is None:
+            return f"order is already {order.status.value}"
+        return None
     
     
     def snapshot(self, depth: int = 10) -> dict:
@@ -173,6 +185,35 @@ class MarketSession:
 
         bids = self.engine.ladder(Side.BID, depth)
         asks = self.engine.ladder(Side.ASK, depth)
+
+        user_orders = []
+        for order_id in sorted(self.my_orders, reverse=True):
+            order = self.engine.find_order(order_id)
+            if order is None:
+                continue
+            user_orders.append({
+                "order_id": order.order_id,
+                "side": order.side.value,
+                "order_type": order.order_type.value,
+                "original_quantity": order.original_qty,
+                "filled_quantity": order.filled_qty,
+                "open_quantity": order.open_qty,
+                "quantity": order.open_qty,
+                "status": order.status.value,
+                "price": (
+                    self.engine.scale.to_price(order.limit_ticks)
+                    if order.limit_ticks is not None else None
+                ),
+            })
+
+        active_orders = [
+            order for order in user_orders
+            if self.engine.find(order["order_id"]) is not None
+        ]
+        finished_orders = [
+            order for order in user_orders
+            if self.engine.find(order["order_id"]) is None
+        ]
 
         return {
             "live": self.live,
@@ -207,14 +248,7 @@ class MarketSession:
 
         "prints": list(self.prints),
 
-        "my_orders": [
-            {"order_id": order.order_id,
-             "side": order.side.value,
-             "quantity": order.open_qty,
-             "status": order.status.value,
-             "price": (self.engine.scale.to_price(order.limit_ticks)
-                    if order.limit_ticks is not None else None),}
-            for order_id in self.my_orders
-            if (order := self.engine.find_order(order_id)) is not None
-        ],
+        "my_orders": user_orders,
+        "my_active_orders": active_orders,
+        "my_finished_orders": finished_orders,
     }

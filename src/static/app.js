@@ -20,6 +20,62 @@ let pendingSubmit = null;
 let selectedOrderId = null;
 let newestOrderId = null;
 let lastSnapshot = null;
+let lastRenderedSnapshot = null;
+
+const SIDE_PANEL_MIN = 260;
+const SIDE_PANEL_MAX = 520;
+const SIDE_PANEL_STORAGE_KEY = "orderbook-side-panel-width";
+
+function setSidePanelWidth(width) {
+  const nextWidth = Math.min(SIDE_PANEL_MAX, Math.max(SIDE_PANEL_MIN, Math.round(width)));
+  document.documentElement.style.setProperty("--side-panel-width", `${nextWidth}px`);
+  document.getElementById("panel-resizer").setAttribute("aria-valuenow", String(nextWidth));
+  return nextWidth;
+}
+
+function initializePanelResizer() {
+  const resizer = document.getElementById("panel-resizer");
+  const savedWidth = Number.parseFloat(localStorage.getItem(SIDE_PANEL_STORAGE_KEY));
+  if (Number.isFinite(savedWidth) && savedWidth > 0) setSidePanelWidth(savedWidth);
+
+  resizer.addEventListener("pointerdown", (event) => {
+    if (window.innerWidth <= 960) return;
+    const startX = event.clientX;
+    const startWidth = document.querySelector(".side-panel").getBoundingClientRect().width;
+    resizer.setPointerCapture(event.pointerId);
+    resizer.classList.add("is-resizing");
+    document.body.classList.add("is-resizing-panel");
+
+    const onMove = (moveEvent) => {
+      setSidePanelWidth(startWidth + startX - moveEvent.clientX);
+    };
+    const onEnd = () => {
+      resizer.removeEventListener("pointermove", onMove);
+      resizer.removeEventListener("pointerup", onEnd);
+      resizer.removeEventListener("pointercancel", onEnd);
+      resizer.classList.remove("is-resizing");
+      document.body.classList.remove("is-resizing-panel");
+      const finalWidth = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--side-panel-width")
+      );
+      localStorage.setItem(SIDE_PANEL_STORAGE_KEY, String(finalWidth));
+      if (lastSnapshot) drawDepthChart(lastSnapshot.book, lastSnapshot.top, lastSnapshot.my_active_orders || []);
+    };
+
+    resizer.addEventListener("pointermove", onMove);
+    resizer.addEventListener("pointerup", onEnd);
+    resizer.addEventListener("pointercancel", onEnd);
+  });
+
+  resizer.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const currentWidth = document.querySelector(".side-panel").getBoundingClientRect().width;
+    const direction = event.key === "ArrowLeft" ? 1 : -1;
+    const nextWidth = setSidePanelWidth(currentWidth + direction * 20);
+    localStorage.setItem(SIDE_PANEL_STORAGE_KEY, String(nextWidth));
+  });
+}
 
 function setStatus(msg, isError = false) {
   const el = document.getElementById("order-status");
@@ -234,12 +290,13 @@ function renderPrintsTicker(prints) {
 function renderMyOrders(orders) {
   const tbody = document.querySelector("#my-orders tbody");
   tbody.innerHTML = "";
-  selectedOrderId = null;
-  document.getElementById("cancel-selected").disabled = true;
+  const activeIds = new Set(orders.map((order) => order.order_id));
+  if (!activeIds.has(selectedOrderId)) selectedOrderId = null;
+  document.getElementById("cancel-selected").disabled = selectedOrderId == null;
 
   if (!orders.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="5" style="text-align:center;color:#8b949e">(none)</td>`;
+    tr.innerHTML = `<td colspan="6" class="empty-row">No resting orders</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -249,11 +306,12 @@ function renderMyOrders(orders) {
     if (o.order_id === newestOrderId) tr.classList.add("newest-order");
     const sideClass = o.side === "bid" ? "side-bid" : "side-ask";
     tr.innerHTML = `
-      <td><input type="radio" name="sel-order" value="${o.order_id}" /></td>
+      <td><input type="radio" name="sel-order" value="${o.order_id}" aria-label="Select order ${o.order_id}" ${o.order_id === selectedOrderId ? "checked" : ""} /></td>
       <td>${o.order_id}</td>
       <td class="${sideClass}">${o.side === "bid" ? "Buy" : "Sell"}</td>
       <td>${fmt(o.price)}</td>
-      <td>${o.quantity}</td>`;
+      <td>${o.open_quantity ?? o.quantity}</td>
+      <td><span class="order-status status-${o.status}">${o.status}</span></td>`;
     tbody.appendChild(tr);
   }
 
@@ -264,8 +322,33 @@ function renderMyOrders(orders) {
     });
   });
 
-  
+}
 
+function renderFinishedOrders(orders) {
+  const tbody = document.querySelector("#finished-orders tbody");
+  tbody.innerHTML = "";
+
+  if (!orders.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" class="empty-row">No finished orders</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const o of [...orders].sort((a, b) => b.order_id - a.order_id)) {
+    const tr = document.createElement("tr");
+    const sideClass = o.side === "bid" ? "side-bid" : "side-ask";
+    const type = o.order_type || (o.price == null ? "market" : "limit");
+    const status = String(o.status || "unknown");
+    tr.innerHTML = `
+      <td>${o.order_id}</td>
+      <td class="${sideClass}">${o.side === "bid" ? "Buy" : "Sell"}</td>
+      <td class="text-capitalize">${type}</td>
+      <td>${fmt(o.price)}</td>
+      <td>${o.filled_quantity ?? 0}</td>
+      <td><span class="order-status status-${status}">${status}</span></td>`;
+    tbody.appendChild(tr);
+  }
 }
 
 function syncControls(s) {
@@ -281,13 +364,24 @@ function syncControls(s) {
 }
 
 function renderSnapshot(s) {
+  const snapshotKey = JSON.stringify(s);
+  if (snapshotKey === lastRenderedSnapshot) return;
+  lastRenderedSnapshot = snapshotKey;
   lastSnapshot = s;
   const top = s.top || {};
   const book = s.book || {};
-  renderDom(book, top, s.my_orders);
-  drawDepthChart(book, top, s.my_orders);
+  const allOrders = s.my_orders || [];
+  const activeOrders = s.my_active_orders || allOrders.filter((order) =>
+    order.status === "resting" || order.status === "partial"
+  );
+  const finishedOrders = s.my_finished_orders || allOrders.filter((order) =>
+    order.status !== "resting" && order.status !== "partial"
+  );
+  renderDom(book, top, activeOrders);
+  drawDepthChart(book, top, activeOrders);
   renderPrintsTicker(s.prints);
-  renderMyOrders(s.my_orders || []);
+  renderMyOrders(activeOrders);
+  renderFinishedOrders(finishedOrders);
   syncControls(s);
 }
 
@@ -329,9 +423,17 @@ async function submitOrder(body) {
 }
 
 async function cancelOrder(orderId) {
-  await api(`/api/orders/${orderId}`, { method: "DELETE" });
-  setStatus(`Cancelled order ${orderId}`);
-  await refresh();
+  const button = document.getElementById("cancel-selected");
+  button.disabled = true;
+  button.textContent = "Cancelling…";
+  try {
+    await api(`/api/orders/${orderId}`, { method: "DELETE" });
+    selectedOrderId = null;
+    setStatus(`Cancelled order ${orderId}`);
+    await refresh();
+  } finally {
+    button.textContent = "Cancel Selected";
+  }
 }
 
 document.getElementById("order-form").addEventListener("submit", (ev) => {
@@ -417,4 +519,5 @@ function startPoll() {
   pollTimer = setInterval(poll, 800);
 }
 
+initializePanelResizer();
 refresh().then(startPoll);

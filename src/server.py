@@ -87,8 +87,12 @@ def submit(body: SubmitBody) -> dict:
 
 @app.delete("/api/orders/{order_id}")
 def cancel_order(order_id: int) -> dict:
+    error = session.cancellation_error(order_id)
+    if error is not None:
+        status_code = 409 if error.startswith("order is already") else 404
+        raise HTTPException(status_code=status_code, detail=error)
     if not session.pull_mine(order_id):
-        raise HTTPException(status_code=404, detail="order not found or not yours")
+        raise HTTPException(status_code=409, detail="order could not be cancelled")
     return {"ok": True}
 
 

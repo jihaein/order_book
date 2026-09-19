@@ -9,6 +9,7 @@
   --accent: #d4a72c;
   --accent-hover: #e3b341;
   --spread: #3d1f1f;
+  --side-panel-width: 300px;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
@@ -24,6 +25,19 @@ body {
   color: var(--text);
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
+}
+
+.file-warning {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #9e6a03;
+  background: #3d2f08;
+  color: #f2cc60;
+  line-height: 1.45;
+}
+
+.file-warning code {
+  color: #fff8c5;
+  font-family: var(--font-mono);
 }
 
 .top-bar {
@@ -60,7 +74,7 @@ body {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(200px, 240px) 1fr minmax(260px, 300px);
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) 7px minmax(260px, var(--side-panel-width));
   gap: 0;
   min-height: calc(100vh - 48px);
 }
@@ -150,7 +164,40 @@ body {
   justify-content: center;
   padding: 0.75rem;
   background: #0a0e14;
+}
+
+.panel-resizer {
+  position: relative;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 1px;
+  height: 36px;
+  transform: translateY(-50%);
+  background: var(--muted);
+  box-shadow: 2px 0 0 var(--muted);
+  opacity: 0.55;
+}
+
+.panel-resizer:hover,
+.panel-resizer:focus-visible,
+.panel-resizer.is-resizing {
+  background: rgba(88, 166, 255, 0.18);
+  outline: none;
+}
+
+body.is-resizing-panel {
+  cursor: col-resize;
+  user-select: none;
 }
 
 #depth-chart {
@@ -400,6 +447,58 @@ body {
   font-weight: 800;
 }
 
+.table-scroll {
+  max-height: 210px;
+  overflow: auto;
+}
+
+.history-table {
+  min-width: 320px;
+  margin-bottom: 0;
+}
+
+.history-table th {
+  position: sticky;
+  top: 0;
+  background: #0d1117;
+}
+
+.mine-table .empty-row {
+  text-align: center;
+  color: var(--muted);
+}
+
+.order-status {
+  display: inline-block;
+  padding: 0.08rem 0.28rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.text-capitalize {
+  text-transform: capitalize;
+}
+
+.order-status.status-resting,
+.order-status.status-partial {
+  border-color: rgba(88, 166, 255, 0.55);
+  color: #58a6ff;
+}
+
+.order-status.status-filled {
+  border-color: rgba(63, 185, 80, 0.55);
+  color: var(--bid);
+}
+
+.order-status.status-cancelled,
+.order-status.status-expired,
+.order-status.status-rejected {
+  border-color: rgba(248, 81, 73, 0.45);
+  color: var(--ask);
+}
+
 .status {
   margin: 0.35rem 0 0;
   font-size: 11px;
@@ -463,5 +562,9 @@ body {
   .chart-panel {
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+
+  .panel-resizer {
+    display: none;
   }
 }

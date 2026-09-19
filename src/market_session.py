@@ -138,8 +138,7 @@ class MarketSession:
         
         self._record(report.fills)
 
-        if order_type is OrderType.LIMIT and report.open_qty > 0:
-            self.my_orders.add(report.order_id)
+        self.my_orders.add(report.order_id)
 
         return {
             "outcome": "accepted",
@@ -151,6 +150,7 @@ class MarketSession:
             "fills": [{ "price": fill.price, "quantity": fill.quantity, "taker": fill.taker_side.value,}
                 for fill in report.fills]
         }
+    
         
     
     def pull_mine(self, order_id: int) -> bool:
@@ -160,18 +160,12 @@ class MarketSession:
         removed = self.engine.pull(order_id)
         if removed is None:
             return False
-        
-        self.my_orders.discard(order_id)
+
         return True
     
     
     def snapshot(self, depth: int = 10) -> dict:
-        self.my_orders = {
-            order_id
-            for order_id in self.my_orders
-            if order_id in self.engine
-        }
-
+        
         best_bid = self.engine.best_bid()
         best_ask = self.engine.best_ask()
         mid = self.engine.mid()
@@ -217,9 +211,10 @@ class MarketSession:
             {"order_id": order.order_id,
              "side": order.side.value,
              "quantity": order.open_qty,
+             "status": order.status.value,
              "price": (self.engine.scale.to_price(order.limit_ticks)
                     if order.limit_ticks is not None else None),}
             for order_id in self.my_orders
-            if (order := self.engine.find(order_id)) is not None
+            if (order := self.engine.find_order(order_id)) is not None
         ],
     }

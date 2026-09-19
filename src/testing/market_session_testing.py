@@ -17,3 +17,4 @@ print(s.submit(Side.BID, OrderType.LIMIT, 5, price=100000, acknowledged=True))
 
 print(s.submit(Side.BID, OrderType.LIMIT, 5, price=50))
 # -> outcome "accepted" — passive, far below the market, harmless. It rests.
+

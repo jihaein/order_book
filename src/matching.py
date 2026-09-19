@@ -80,6 +80,7 @@ class OrderType(Enum):
     MARKET = "market"
 
 class OrderStatus(Enum):
+    NEW = "new" # when the order is newly added (before sweep)
     FILLED = "filled"       # fully traded
     PARTIAL = "partial"     # some traded. remainder exists as resting
     RESTING = "resting"     # nothing traded (all rests)
@@ -116,7 +117,7 @@ class Order:
     limit_ticks: int | None = None  # ticks / None only for market order
     arrival: int=0  # time tick (?)
     actor: str="flow"
-    status: OrderStatus
+    status: OrderStatus = OrderStatus.NEW
 
     @property
     def filled_qty(self) -> int:
@@ -140,7 +141,7 @@ class Fill:
 @dataclass
 class ExecutionReport:
     order_id: int
-    status: OrderStatus 
+    status: OrderStatus
     fills: list[Fill] # all trade related to this order
     filled_qty: int
     open_qty: int 
@@ -342,8 +343,13 @@ class MatchingEngine:
     def ladder(self, side: Side, depth: int | None = None) -> list[tuple[float, int]]:
         return self.side(side).ladder(depth)
     
+    # finding order from the active order (resting order)
     def find(self, order_id: int) -> Order | None:
         return self._index.get(order_id)
+    
+    # finding order from the history
+    def find_order(self, order_id: int) -> Order | None:
+        return self._order_history.get(order_id)
     
     def __contains__(self, order_id: int) -> bool:
         return self.find(order_id) is not None
@@ -367,6 +373,7 @@ class MatchingEngine:
         self.bids.clear()
         self.asks.clear()
         self._index.clear()
+        self._order_history.clear()
 
     # placing limit order
     def place_limit(
@@ -401,10 +408,10 @@ class MatchingEngine:
             actor=actor
         )
 
-        # register this order into order_history
-        
+        # register this order into _order_history
+        self._order_history[order.order_id] = order
 
-
+        # mutates open_qty
         fills = self._sweep(order)
 
         if not order.is_done:
@@ -416,7 +423,8 @@ class MatchingEngine:
             status_er = OrderStatus.RESTING
         else:
             status_er = OrderStatus.PARTIAL
-        
+
+        order.status = status_er
 
         return ExecutionReport(
             order_id = order.order_id,
@@ -449,12 +457,16 @@ class MatchingEngine:
         arrival = next(self._next_arrival),
         actor=actor)
 
+        self._order_history[order.order_id] = order
+
         fills = self._sweep(order)
 
         if order.open_qty == 0:
             status_er = OrderStatus.FILLED
         else:
             status_er = OrderStatus.EXPIRED
+
+        order.status = status_er
         
         return ExecutionReport(
             order_id = order.order_id,
@@ -482,8 +494,11 @@ class MatchingEngine:
         if level is not None:
             level.withdraw(order_id)
             book.discard_if_empty(order.limit_ticks)
+
+        order.status = OrderStatus.CANCELLED
+
         return order
-    
+
     # takes incoming order and match with best bid/ask
     def _sweep(self, incoming: Order) -> list[Fill]:
         contra = self.side(incoming.side.contra)
@@ -502,6 +517,11 @@ class MatchingEngine:
             while incoming.open_qty > 0 and level:
                 resting, qty = level.fill_head(incoming.open_qty)
                 incoming.open_qty -= qty
+
+                if resting.open_qty == 0: 
+                    resting.status = OrderStatus.FILLED
+                else:
+                    resting.status = OrderStatus.PARTIAL
 
                 fills.append(Fill(
                     price = level.price,

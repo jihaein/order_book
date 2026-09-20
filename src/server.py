@@ -32,6 +32,10 @@ class SubmitBody(BaseModel):
     acknowledged: bool = False
 
 
+class StrategyBody(BaseModel):
+    enabled: bool
+
+
 def _parse_side(value: str) -> Side:
     try:
         return Side(value.lower())
@@ -71,6 +75,15 @@ def advance(body: AdvanceBody) -> dict:
 def restart() -> dict:
     session.restart()
     return {"ok": True}
+
+
+@app.post("/api/strategy")
+def strategy(body: StrategyBody) -> dict:
+    if body.enabled:
+        session.start_strategy()
+    else:
+        session.stop_strategy()
+    return {"ok": True, "enabled": session.strategy_enabled}
 
 
 @app.post("/api/submit")

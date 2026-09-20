@@ -50,6 +50,7 @@ class ASMarketMaker:
         self.order_quantity = order_quantity
         self.active_bid_id: int | None = None
         self.active_ask_id: int | None = None
+        self.last_quote: ExecutableQuote | None = None
 
     def remaining_time(self, current_tick: int) -> float:
         remaining = (self.total_ticks - current_tick) / self.total_ticks
@@ -92,6 +93,7 @@ class ASMarketMaker:
     def refresh(self, mid_price: float, inventory: int, volatility: float, current_tick: int,):
         # calculate the new executable quote 
         quote = self.calculate_executable_quote(mid_price, inventory, volatility, current_tick)
+        self.last_quote = quote
         # cancel the previous bid and ask
         self.cancel_active_quotes()
 

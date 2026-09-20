@@ -13,6 +13,27 @@ const fmtMoney = (n) =>
         maximumFractionDigits: 2,
       });
 
+const SIDE_PRESENTATION = Object.freeze({
+  bid: { className: "side-bid", label: "Buy" },
+  ask: { className: "side-ask", label: "Sell" },
+});
+
+const STATUS_PRESENTATION = Object.freeze({
+  new: { className: "status-new", label: "New" },
+  resting: { className: "status-resting", label: "Resting" },
+  partial: { className: "status-partial", label: "Partial" },
+  filled: { className: "status-filled", label: "Filled" },
+  cancelled: { className: "status-cancelled", label: "Cancelled" },
+  expired: { className: "status-expired", label: "Expired" },
+  rejected: { className: "status-rejected", label: "Rejected" },
+});
+
+const sidePresentation = (side) =>
+  SIDE_PRESENTATION[String(side).toLowerCase()] || { className: "side-unknown", label: "Unknown" };
+
+const statusPresentation = (status) =>
+  STATUS_PRESENTATION[String(status).toLowerCase()] || { className: "status-unknown", label: "Unknown" };
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json", ...options.headers },
@@ -107,7 +128,10 @@ function renderDom(book, top, myOrders) {
   const myQuantityAt = new Map();
   for (const order of myOrders || []) {
     const key = `${order.side}:${order.price}`;
-    myQuantityAt.set(key, (myQuantityAt.get(key) || 0) + order.quantity);
+    const current = myQuantityAt.get(key) || { quantity: 0, automatic: true };
+    current.quantity += order.quantity;
+    current.automatic = current.automatic && order.source === "strategy";
+    myQuantityAt.set(key, current);
   }
 
   const spreadVal = top?.spread;
@@ -117,11 +141,14 @@ function renderDom(book, top, myOrders) {
   for (const level of asks) {
     const tr = document.createElement("tr");
     tr.className = "ask";
-    const myQty = myQuantityAt.get(`ask:${level.price}`);
-    if (myQty) tr.classList.add("mine-level");
+    const mine = myQuantityAt.get(`ask:${level.price}`);
+    if (mine) {
+      tr.classList.add("mine-level");
+      if (mine.automatic) tr.classList.add("strategy-level");
+    }
     tr.innerHTML = `
       <td class="bid-qty"></td>
-      <td class="price">${fmt(level.price)}${myQty ? `<span class="mine-badge">YOU · ${fmtQty(myQty)}</span>` : ""}</td>
+      <td class="price">${fmt(level.price)}${mine ? `<span class="mine-badge ${mine.automatic ? "auto" : ""}">${mine.automatic ? "A–S" : "YOU"} · ${fmtQty(mine.quantity)}</span>` : ""}</td>
       <td class="ask-qty">${fmtQty(level.quantity)}</td>`;
     tbody.appendChild(tr);
   }
@@ -136,11 +163,14 @@ function renderDom(book, top, myOrders) {
   for (const level of bids) {
     const tr = document.createElement("tr");
     tr.className = "bid";
-    const myQty = myQuantityAt.get(`bid:${level.price}`);
-    if (myQty) tr.classList.add("mine-level");
+    const mine = myQuantityAt.get(`bid:${level.price}`);
+    if (mine) {
+      tr.classList.add("mine-level");
+      if (mine.automatic) tr.classList.add("strategy-level");
+    }
     tr.innerHTML = `
       <td class="bid-qty">${fmtQty(level.quantity)}</td>
-      <td class="price">${fmt(level.price)}${myQty ? `<span class="mine-badge">YOU · ${fmtQty(myQty)}</span>` : ""}</td>
+      <td class="price">${fmt(level.price)}${mine ? `<span class="mine-badge ${mine.automatic ? "auto" : ""}">${mine.automatic ? "A–S" : "YOU"} · ${fmtQty(mine.quantity)}</span>` : ""}</td>
       <td class="ask-qty"></td>`;
     tbody.appendChild(tr);
   }
@@ -268,7 +298,7 @@ function drawDepthChart(book, top, myOrders) {
     ctx.moveTo(x, padT);
     ctx.lineTo(x, padT + plotH);
     ctx.stroke();
-    const label = `YOU ${o.side === "bid" ? "BUY" : "SELL"} ${o.quantity}`;
+    const label = `${o.source === "strategy" ? "A–S" : "YOU"} ${o.side === "bid" ? "BUY" : "SELL"} ${o.quantity}`;
     ctx.font = "bold 10px ui-monospace, monospace";
     const labelWidth = ctx.measureText(label).width + 8;
     const labelX = Math.min(Math.max(x + 4, padL), w - padR - labelWidth);
@@ -318,6 +348,51 @@ function renderPortfolio(portfolio = {}) {
   inventoryEl.classList.toggle("negative", inventory < 0);
 }
 
+function renderStrategy(strategy = {}, top = {}, portfolio = {}) {
+  const enabled = !!strategy.enabled;
+  const card = document.querySelector(".strategy-card");
+  const button = document.getElementById("toggle-strategy");
+  const status = document.getElementById("strategy-status");
+  const dot = document.getElementById("strategy-dot");
+  const hasQuote = enabled && strategy.bid_price != null && strategy.ask_price != null;
+
+  card.classList.toggle("is-running", enabled);
+  button.textContent = enabled ? "Stop" : "Start";
+  button.classList.toggle("is-running", enabled);
+  button.setAttribute("aria-pressed", String(enabled));
+  dot.classList.toggle("is-running", enabled);
+  status.textContent = enabled ? (hasQuote ? "Quoting" : "Starting…") : "Stopped";
+
+  document.getElementById("strategy-bid").textContent = hasQuote ? fmt(strategy.bid_price) : "—";
+  document.getElementById("strategy-ask").textContent = hasQuote ? fmt(strategy.ask_price) : "—";
+  document.getElementById("strategy-spread").textContent = hasQuote
+    ? fmt(strategy.ask_price - strategy.bid_price)
+    : "—";
+
+  document.getElementById("strategy-risk").textContent = strategy.risk_aversion ?? "—";
+  document.getElementById("strategy-kappa").textContent = strategy.kappa ?? "—";
+  document.getElementById("strategy-volatility").textContent = strategy.volatility ?? "—";
+  document.getElementById("strategy-size").textContent = strategy.order_quantity ?? "—";
+  document.getElementById("strategy-target").textContent = strategy.target_inventory ?? "—";
+  document.getElementById("strategy-refresh").textContent = strategy.refresh_interval == null
+    ? "—"
+    : `${strategy.refresh_interval} ticks`;
+
+  const biasEl = document.getElementById("strategy-bias");
+  if (!enabled) {
+    biasEl.textContent = "Start the strategy to generate inventory-aware quotes.";
+  } else if (!hasQuote) {
+    biasEl.textContent = "Waiting for a two-sided market before placing quotes.";
+  } else {
+    const quoteMid = (strategy.bid_price + strategy.ask_price) / 2;
+    const marketMid = top.mid;
+    const skew = marketMid == null ? null : quoteMid - marketMid;
+    const inventory = Number(portfolio.inventory) || 0;
+    const direction = inventory > 0 ? "long inventory · leaning lower" : inventory < 0 ? "short inventory · leaning higher" : "inventory neutral";
+    biasEl.textContent = `${direction}${skew == null ? "" : ` · ${skew >= 0 ? "+" : ""}${fmt(skew)} vs mid`}`;
+  }
+}
+
 function renderMyOrders(orders) {
   const tbody = document.querySelector("#my-orders tbody");
   tbody.innerHTML = "";
@@ -335,14 +410,16 @@ function renderMyOrders(orders) {
   for (const o of orders) {
     const tr = document.createElement("tr");
     if (o.order_id === newestOrderId) tr.classList.add("newest-order");
-    const sideClass = o.side === "bid" ? "side-bid" : "side-ask";
+    if (o.source === "strategy") tr.classList.add("strategy-order");
+    const side = sidePresentation(o.side);
+    const status = statusPresentation(o.status);
     tr.innerHTML = `
       <td><input type="radio" name="sel-order" value="${o.order_id}" aria-label="Select order ${o.order_id}" ${o.order_id === selectedOrderId ? "checked" : ""} /></td>
-      <td>${o.order_id}</td>
-      <td class="${sideClass}">${o.side === "bid" ? "Buy" : "Sell"}</td>
+      <td>${o.order_id}${o.source === "strategy" ? `<span class="auto-badge">AUTO</span>` : ""}</td>
+      <td class="${side.className}">${side.label}</td>
       <td>${fmt(o.price)}</td>
       <td>${o.open_quantity ?? o.quantity}</td>
-      <td><span class="order-status status-${o.status}">${o.status}</span></td>`;
+      <td><span class="order-status ${status.className}">${status.label}</span></td>`;
     tbody.appendChild(tr);
   }
 
@@ -368,16 +445,16 @@ function renderFinishedOrders(orders) {
 
   for (const o of [...orders].sort((a, b) => b.order_id - a.order_id)) {
     const tr = document.createElement("tr");
-    const sideClass = o.side === "bid" ? "side-bid" : "side-ask";
+    const side = sidePresentation(o.side);
     const type = o.order_type || (o.price == null ? "market" : "limit");
-    const status = String(o.status || "unknown");
+    const status = statusPresentation(o.status);
     tr.innerHTML = `
       <td>${o.order_id}</td>
-      <td class="${sideClass}">${o.side === "bid" ? "Buy" : "Sell"}</td>
-      <td class="text-capitalize">${type}</td>
+      <td class="${side.className}">${side.label}</td>
+      <td class="text-capitalize">${o.source === "strategy" ? "AS " : ""}${type}</td>
       <td>${fmt(o.price)}</td>
       <td>${o.filled_quantity ?? 0}</td>
-      <td><span class="order-status status-${status}">${status}</span></td>`;
+      <td><span class="order-status ${status.className}">${status.label}</span></td>`;
     tbody.appendChild(tr);
   }
 }
@@ -412,6 +489,7 @@ function renderSnapshot(s) {
   drawDepthChart(book, top, activeOrders);
   renderPrintsTicker(s.prints);
   renderPortfolio(s.portfolio);
+  renderStrategy(s.strategy, top, s.portfolio);
   renderMyOrders(activeOrders);
   renderFinishedOrders(finishedOrders);
   syncControls(s);
@@ -497,6 +575,24 @@ document.getElementById("ack-dialog").addEventListener("close", () => {
 document.getElementById("toggle-flow").addEventListener("click", () => {
   const next = !(lastSnapshot?.live);
   configure({ live: next }).catch((e) => setStatus(e.message, true));
+});
+
+document.getElementById("toggle-strategy").addEventListener("click", async () => {
+  const enabled = !(lastSnapshot?.strategy?.enabled);
+  const button = document.getElementById("toggle-strategy");
+  button.disabled = true;
+  try {
+    await api("/api/strategy", { method: "POST", body: JSON.stringify({ enabled }) });
+    if (enabled && !lastSnapshot?.live) {
+      await api("/api/configure", { method: "POST", body: JSON.stringify({ live: true }) });
+    }
+    setStatus(enabled ? "Auto market maker started" : "Auto market maker stopped");
+    await refresh();
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
 document.getElementById("tempo").addEventListener("input", (ev) => {

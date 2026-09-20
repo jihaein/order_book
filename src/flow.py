@@ -173,3 +173,5 @@ class FlowGenerator:
                 trades.extend(agent.act(self))
             self.ticks_elapsed += 1
         return trades
+    
+    

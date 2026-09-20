@@ -3,6 +3,8 @@ from flow import FlowGenerator, FlowSettings
 from collections import deque
 from time import strftime
 from dataclasses import dataclass, field
+from strategies.avellaneda_stoikov import ASParameters
+from strategies.as_market_maker import ASMarketMaker
 
 @dataclass(frozen=True)
 class BandVerdict:
@@ -21,6 +23,7 @@ class MarketSession:
         self.my_orders: set[int] = set() # stores order_id
         self.last_print: float | None = None
         self.flow.advance()
+
         # this is for inventory tracking
         if initial_cash < 0:
             raise ValueError("돈이 0보다 많아야 합니다.")
@@ -28,8 +31,74 @@ class MarketSession:
         self.cash = float(initial_cash)
         self.inventory = 0
 
+        # AS Model
+        self.strategy_enabled = False
+        self.strategy_volatility = 0.05
+        self.strategy_refresh_interval = 10
+        self.strategy_order_ids: set[int] = set()
+        self._last_strategy_refresh_tick: int | None = None
+        self.market_maker = ASMarketMaker(
+            engine=self.engine,
+            parameters=ASParameters(
+                risk_aversion=0.1,
+                kappa=50,
+                target_inventory=0,
+            ),
+            total_ticks=10_000,
+            order_quantity=10,
+        )
 
-    # Inventory tracking methods
+    # ===== AS Model ===
+    def start_strategy(self) -> None:
+        self.strategy_enabled = True
+        self._last_strategy_refresh_tick = None
+
+    def stop_strategy(self) -> None:
+        self.strategy_enabled = False
+        self.market_maker.cancel_active_quotes()
+
+    # AS Model
+    def _process_fills(self, fills: list[Fill]) -> None:
+        if not fills:
+            return
+        self._record(fills)
+        for fill in fills:
+            self._account_for_fill(fill)
+
+    def _refresh_strategy(self) -> None:
+        if not self.strategy_enabled:
+            return
+
+        current_tick = self.flow.ticks_elapsed
+        if (
+            self._last_strategy_refresh_tick is not None
+            and current_tick - self._last_strategy_refresh_tick < self.strategy_refresh_interval
+        ):
+            return
+
+        mid_price = self.engine.mid()
+        if mid_price is None:
+            return
+
+        bid_report, ask_report = self.market_maker.refresh(
+            mid_price=mid_price,
+            inventory=self.inventory,
+            volatility=self.strategy_volatility,
+            current_tick=current_tick,
+        )
+
+        self.my_orders.add(bid_report.order_id)
+        self.my_orders.add(ask_report.order_id)
+        self.strategy_order_ids.add(bid_report.order_id)
+        self.strategy_order_ids.add(ask_report.order_id)
+        self._last_strategy_refresh_tick = current_tick
+
+        self._process_fills(bid_report.fills)
+        self._process_fills(ask_report.fills)
+
+
+
+    # ====== Inventory tracking methods ========
 
     # 1) updates inventory & cash according to buy / sell sign (pos / neg)
     def _apply_user_execution(self, side: Side, price: float, quantity: int) -> None: 
@@ -41,7 +110,7 @@ class MarketSession:
     # 2) if incoming / resting order belongs to user, apply execution 
     def _account_for_fill(self, fill: Fill) -> None:
         incoming_order = self.engine.find_order(fill.incoming_id)
-        if incoming_order.actor == "user":
+        if incoming_order is not None and incoming_order.actor == "user":
             self._apply_user_execution(
                 side = incoming_order.side,
                 price = fill.price,
@@ -50,7 +119,7 @@ class MarketSession:
 
         resting_order = self.engine.find_order(fill.resting_id)
 
-        if resting_order.actor == "user":
+        if resting_order is not None and resting_order.actor == "user":
             self._apply_user_execution(
                 side = resting_order.side,
                 price = fill.price,
@@ -58,9 +127,7 @@ class MarketSession:
             )
 
     def _record(self, fills: list[Fill]) -> None:
-        record = {}
         for fill in fills:
-            self._account_for_fill(fill)
             print_data = {
                 "at": strftime("%H:%M:%S"),
                 "price": fill.price,
@@ -98,8 +165,11 @@ class MarketSession:
     def advance(self, ticks: int=1) -> None:
         if not self.live:
             return
-        else: 
-            self._record(self.flow.advance(ticks))
+
+        fills = self.flow.advance(ticks)
+        self._process_fills(fills)
+        self._refresh_strategy()
+
     
     def restart(self) -> None:
         self.engine.reset()
@@ -107,6 +177,13 @@ class MarketSession:
             self.engine,
             FlowSettings(seed=self.flow.settings.seed)
         )
+        self.market_maker.cancel_active_quotes()
+        self.strategy_enabled = False
+        self._last_strategy_refresh_tick = None
+        self.strategy_order_ids.clear()
+        self.market_maker.active_ask_id = None
+        self.market_maker.active_bid_id = None
+        self.market_maker.last_quote = None
         self.prints.clear()
         self.my_orders.clear()
         self.last_print = None
@@ -145,7 +222,7 @@ class MarketSession:
                 price=ceiling,
                 reason=(f"BID at {price:,.2f} 는 시장가보다 {pct_above:,.0f}% 더 높습니다. 주문은 ceiling 값인 {ceiling:,.2f} 으로 고정됩니다."),
             )
-        
+
         if side is Side.ASK and price < floor:
             pct_below = (1 - price / ref) * 100
             return BandVerdict(
@@ -198,7 +275,7 @@ class MarketSession:
                 "reason": "지정가주문 또는 시장가주문 둘 중에 하나를 선택하세요."
             }
         
-        self._record(report.fills)
+        self._process_fills(report.fills)
 
         self.my_orders.add(report.order_id)
 
@@ -262,6 +339,11 @@ class MarketSession:
                 "open_quantity": order.open_qty,
                 "quantity": order.open_qty,
                 "status": order.status.value,
+                "source": (
+                    "strategy"
+                    if order.order_id in self.strategy_order_ids
+                    else "manual"
+                ),
                 "price": (
                     self.engine.scale.to_price(order.limit_ticks)
                     if order.limit_ticks is not None else None
@@ -276,6 +358,8 @@ class MarketSession:
             order for order in user_orders
             if self.engine.find(order["order_id"]) is None
         ]
+        
+        strategy_quote = self.market_maker.last_quote
 
         return {
             "live": self.live,
@@ -295,6 +379,30 @@ class MarketSession:
                 "spread": spread,
                 "fair_value": self.flow.fair_value.value,
                 "last_print": self.last_print,
+            },
+
+            "strategy": {
+                "enabled": self.strategy_enabled,
+                "volatility": self.strategy_volatility,
+                "risk_aversion": self.market_maker.parameters.risk_aversion,
+                "kappa": self.market_maker.parameters.kappa,
+                "order_quantity": self.market_maker.order_quantity,
+                "target_inventory": self.market_maker.parameters.target_inventory,
+                "refresh_interval": self.strategy_refresh_interval,
+                "total_ticks": self.market_maker.total_ticks,
+                "remaining_time": self.market_maker.remaining_time(self.flow.ticks_elapsed),
+                "active_bid_id": self.market_maker.active_bid_id,
+                "active_ask_id": self.market_maker.active_ask_id,
+                "bid_price": (
+                    strategy_quote.bid_price
+                    if strategy_quote is not None
+                    else None
+                ),
+                "ask_price": (
+                    strategy_quote.ask_price
+                    if strategy_quote is not None
+                    else None
+                ),
             },
             
             "book": {

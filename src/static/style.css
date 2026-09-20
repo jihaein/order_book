@@ -6,6 +6,8 @@
   --muted: #8b949e;
   --bid: #3fb950;
   --ask: #f85149;
+  --strategy: #a371f7;
+  --strategy-soft: rgba(163, 113, 247, 0.12);
   --accent: #d4a72c;
   --accent-hover: #e3b341;
   --spread: #3d1f1f;
@@ -373,6 +375,178 @@ body.is-resizing-panel {
   font-family: var(--font-mono);
 }
 
+.strategy-card {
+  border-color: rgba(163, 113, 247, 0.42);
+}
+
+.strategy-card.is-running {
+  border-color: rgba(163, 113, 247, 0.8);
+  box-shadow: inset 0 1px 0 rgba(163, 113, 247, 0.12);
+}
+
+.strategy-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.strategy-heading .card-title {
+  margin-bottom: 0.2rem;
+}
+
+.strategy-state {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.strategy-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #484f58;
+}
+
+.strategy-dot.is-running {
+  background: var(--bid);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.15);
+}
+
+.strategy-toggle {
+  min-width: 54px;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid rgba(163, 113, 247, 0.65);
+  border-radius: 4px;
+  background: var(--strategy-soft);
+  color: #d2b8ff;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.strategy-toggle:hover:not(:disabled) {
+  background: rgba(163, 113, 247, 0.22);
+}
+
+.strategy-toggle:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.strategy-toggle.is-running {
+  border-color: rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.08);
+  color: #ffb4b4;
+}
+
+.strategy-toggle:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.strategy-quote {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 1fr;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--border);
+  font-family: var(--font-mono);
+}
+
+.strategy-quote > div {
+  min-width: 0;
+  padding: 0.42rem 0.35rem;
+  background: #010409;
+  text-align: center;
+}
+
+.strategy-quote span {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.strategy-quote strong {
+  font-size: 12px;
+}
+
+.strategy-side.bid strong {
+  color: var(--bid);
+}
+
+.strategy-side.ask strong {
+  color: var(--ask);
+}
+
+.strategy-spread strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.strategy-bias {
+  min-height: 2.8em;
+  margin: 0.45rem 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.strategy-details {
+  border-top: 1px solid var(--border);
+  padding-top: 0.4rem;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.strategy-details summary {
+  cursor: pointer;
+  color: #d2b8ff;
+}
+
+.strategy-parameters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0.4rem 0 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--border);
+}
+
+.strategy-parameters div {
+  min-width: 0;
+  padding: 0.3rem 0.35rem;
+  background: #010409;
+}
+
+.strategy-parameters dt {
+  margin-bottom: 0.1rem;
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.strategy-parameters dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .seg-row {
   margin-bottom: 0.45rem;
 }
@@ -514,6 +688,34 @@ body.is-resizing-panel {
   font-weight: 800;
 }
 
+.dom tr.strategy-level td {
+  background: var(--strategy-soft);
+  border-top-color: rgba(163, 113, 247, 0.75);
+  border-bottom-color: rgba(163, 113, 247, 0.75);
+}
+
+.mine-badge.auto,
+.auto-badge {
+  background: var(--strategy);
+  color: #10061f;
+}
+
+.auto-badge {
+  display: inline-block;
+  margin-left: 0.28rem;
+  padding: 0.03rem 0.2rem;
+  border-radius: 3px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
+.mine-table tr.strategy-order td {
+  background: rgba(163, 113, 247, 0.06);
+}
+
 .table-scroll {
   max-height: 210px;
   overflow: auto;
@@ -548,10 +750,16 @@ body.is-resizing-panel {
   text-transform: capitalize;
 }
 
+.order-status.status-new,
 .order-status.status-resting,
 .order-status.status-partial {
   border-color: rgba(88, 166, 255, 0.55);
   color: #58a6ff;
+}
+
+.order-status.status-unknown,
+.mine-table .side-unknown {
+  color: var(--muted);
 }
 
 .order-status.status-filled {

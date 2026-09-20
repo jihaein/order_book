@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ORDER BOOK SIM-X</title>
-  <link rel="stylesheet" href="/static/style.css?v=6" />
+  <link rel="stylesheet" href="/static/style.css?v=8" />
 </head>
 <body>
   <div id="file-warning" class="file-warning" hidden>
@@ -90,6 +90,45 @@
           </div>
         </dl>
         <p class="portfolio-basis">Starting cash <span id="portfolio-initial-cash">—</span></p>
+      </div>
+
+      <div class="card strategy-card" aria-labelledby="strategy-title">
+        <div class="strategy-heading">
+          <div>
+            <h2 class="card-title" id="strategy-title">A–S Auto Market Maker</h2>
+            <p class="strategy-state"><span class="strategy-dot" id="strategy-dot"></span><span id="strategy-status">Stopped</span></p>
+          </div>
+          <button type="button" class="strategy-toggle" id="toggle-strategy">Start</button>
+        </div>
+
+        <div class="strategy-quote" aria-live="polite">
+          <div class="strategy-side bid">
+            <span>Bid</span>
+            <strong id="strategy-bid">—</strong>
+          </div>
+          <div class="strategy-spread">
+            <span>Spread</span>
+            <strong id="strategy-spread">—</strong>
+          </div>
+          <div class="strategy-side ask">
+            <span>Ask</span>
+            <strong id="strategy-ask">—</strong>
+          </div>
+        </div>
+
+        <p class="strategy-bias" id="strategy-bias">Start the strategy to generate inventory-aware quotes.</p>
+
+        <details class="strategy-details">
+          <summary>Model parameters</summary>
+          <dl class="strategy-parameters">
+            <div><dt>Risk γ</dt><dd id="strategy-risk">—</dd></div>
+            <div><dt>Kappa κ</dt><dd id="strategy-kappa">—</dd></div>
+            <div><dt>Volatility σ</dt><dd id="strategy-volatility">—</dd></div>
+            <div><dt>Quote size</dt><dd id="strategy-size">—</dd></div>
+            <div><dt>Target inv.</dt><dd id="strategy-target">—</dd></div>
+            <div><dt>Refresh</dt><dd id="strategy-refresh">—</dd></div>
+          </dl>
+        </details>
       </div>
 
       <div class="card">
@@ -181,6 +220,6 @@
       document.getElementById("file-warning").hidden = false;
     }
   </script>
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

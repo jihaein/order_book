@@ -6,6 +6,7 @@ from sortedcontainers import SortedDict
 from typing import Protocol
 from itertools import count, islice
 from typing import Iterable, Iterator, Optional
+import math
 
 """
 For coworking developers, this is how you use the imported packages
@@ -100,11 +101,19 @@ class TickScale:
     def to_ticks(self, price: float) -> int:
         return int(round(price / self.size))
     
-    def to_price(self, price: float) -> float:
-        return round(price * self.size, 10)
+    def to_price(self, ticks: int) -> float:
+        return round(ticks * self.size, 10)
     
     def snap(self, price: float) -> float:
         return self.to_price(self.to_ticks(price))
+    
+    def floor_to_ticks(self, price: float) -> int:
+        # round downward 
+        return math.floor(price / self.size)
+    
+    def ceil_to_ticks(self, price: float) -> int:
+        # round upward
+        return math.ceil(price / self.size)
     
 
 @dataclass

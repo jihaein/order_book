@@ -6,6 +6,7 @@ from sortedcontainers import SortedDict
 from typing import Protocol
 from itertools import count, islice
 from typing import Iterable, Iterator, Optional
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 import math
 
 """
@@ -95,25 +96,35 @@ class TickScale:
     size: float = 0.05
 
     def __post_init__(self): 
-        if self.size <= 0:
-            raise ValueError("size가 0보다 커야 합니다.")
+        if not math.isfinite(self.size) or self.size <= 0:
+            raise ValueError("size 가 0보다 커야합니다.")
+        
+    def _ratio(self, price: float) -> Decimal:
+        if not math.isfinite(price):
+            raise ValueError("price must be finite")
+        return Decimal(str(price)) / Decimal(str(self.size))
     
     def to_ticks(self, price: float) -> int:
-        return int(round(price / self.size))
-    
+        return int(self._ratio(price).to_integral_value(rounding=ROUND_HALF_UP))
+
     def to_price(self, ticks: int) -> float:
-        return round(ticks * self.size, 10)
+        price = Decimal(ticks) * Decimal(str(self.size))
+        return float(price)
     
     def snap(self, price: float) -> float:
         return self.to_price(self.to_ticks(price))
     
     def floor_to_ticks(self, price: float) -> int:
         # round downward 
-        return math.floor(price / self.size)
+        return int(self._ratio(price).to_integral_value(rounding=ROUND_FLOOR))
     
     def ceil_to_ticks(self, price: float) -> int:
         # round upward
-        return math.ceil(price / self.size)
+        return int(self._ratio(price).to_integral_value(rounding=ROUND_CEILING))
+    
+    def is_aligned(self, price: float) -> bool:
+        ratio = self._ratio(price)
+        return ratio == ratio.to_integral_value()
     
 
 @dataclass
@@ -547,7 +558,6 @@ class MatchingEngine:
             contra.discard_if_empty(ticks)
 
         return fills
-
 
 
 

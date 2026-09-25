@@ -258,6 +258,13 @@ class MarketSession:
                     "reason" : "지정자 주문에 가격이 빠졌습니다."
                 }
             
+            if not self.engine.scale.is_aligned(price):
+                return {
+                    "outcome": "rejected",
+                    "reason": (f"Price must be a multiple of "
+                               f"{self.engine.scale.size:.2f}."),
+                }
+            
             verdict = self.vet_limit(side, price)
 
             if not verdict.within and not acknowledged:

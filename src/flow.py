@@ -11,7 +11,6 @@ from typing import Protocol
 @dataclass
 class FlowSettings:
     anchor: float = 100.0 # fair_value
-    tick_size: float = 0.01
 
     drift: float = 0.0 # driftd
     vol: float = 0.05 # sigma
@@ -82,7 +81,7 @@ class QuotePoster:
         trades: list[Fill] = []
 
         n = poisson(ctx.rng, settings.quote_intensity)
-        tick = settings.tick_size
+        tick = ctx.engine.scale.size
  
         # choosing the side
         for _ in range(n):

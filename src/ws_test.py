@@ -5,7 +5,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 CURRENT_FILE = Path(__file__).resolve()
-PROJECT_ROOT = CURRENT_FILE.parents[2]
+REPO_ROOT = CURRENT_FILE.parents[1]
+PROJECT_ROOT = REPO_ROOT.parent
 KIS_REPO = PROJECT_ROOT / "open-trading-api"
 EXAMPLES_USER = KIS_REPO / "examples_user"
 FUTURES_EXAMPLES = EXAMPLES_USER / "domestic_futureoption"
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # KOSPI 200 코드 (.mtx 파일에서 찾음)
 FUTURES_CODE = "A01612"
-DATA_DIR = PROJECT_ROOT / "orderbook" / "data"
+DATA_DIR = REPO_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # mapping to documentation number instead of id
@@ -73,7 +74,7 @@ def on_result(ws, tr_id, result, data_info):
     rows.insert(0, "received_at", received_at.isoformat(timespec="milliseconds"))
 
     date_text = received_at.strftime("%Y%m%d")
-    output_file = DATA_DIR / f"{date_text}_{stream_name}.csv"
+    output_file = DATA_DIR / f"{date_text}_{stream_name}_09_23.csv"
 
     write_header = not output_file.exists()
 

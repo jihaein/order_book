@@ -108,7 +108,7 @@ missing, clone it beside this repository:
 ```bash
 cd ..
 git clone https://github.com/koreainvestment/open-trading-api.git
-cd orderbook
+cd -
 ```
 
 From the `orderbook` directory, run:

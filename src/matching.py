@@ -92,7 +92,7 @@ class OrderStatus(Enum):
 
 @dataclass(frozen=True)
 class TickScale:
-    size: float = 0.01
+    size: float = 0.05
 
     def __post_init__(self): 
         if self.size <= 0:

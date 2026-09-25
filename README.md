@@ -78,22 +78,22 @@ Start the application:
 python src/app.py
 ```
 
-Then open http://127.0.0.1:8000 in your browser.
-
-If port 8000 is already in use, the server is probably already running. Try
-opening the URL before starting another server.
+Open http://127.0.0.1:8000 in your browser.
 
 For automatic reload during development, use:
 ```bash
 PYTHONPATH=src uvicorn server:app --reload
 ```
 
-Do not open `src/static/index.html` directly with a `file://` URL. The page
-needs the local API server. The former Streamlit interface has been removed so
-all supported launch commands now use the same frontend.
-
-You can also double-click `start.command` in Finder. It starts the local server
-if needed and opens the app. Server output is stored in `logs/app.log`.
+From cloning -> activating virtual environment -> installing requirements -> opening the front end html page:
+```bash
+git clone https://github.com/jihaein/order_book.git
+cd order_book
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python src/app.py
+```
 
 ### Collecting KOSPI 200 Futures Data
 
@@ -116,11 +116,6 @@ From the `orderbook` directory, run:
 python src/ws_test.py
 ```
 
-For a full session on macOS, use:
-```bash
-caffeinate -i python src/ws_test.py
-```
-
 The files are saved:
 
 ```text
@@ -135,5 +130,3 @@ ls -lh data
 wc -l data/YYYYMMDD_010.csv
 wc -l data/YYYYMMDD_011.csv
 ```
-
-031 is left out for now because KIS documents it as a stock futures feed, while this script is collecting KOSPI 200 index futures.

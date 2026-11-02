@@ -67,6 +67,22 @@ def test_matching_engine_lifecycle() -> None:
     assert engine.find(buy_id) is None, "Cancelled order must leave active index"
 
 
+def test_market_buy_uses_best_available_asks() -> None:
+    """A market buy must ignore any UI price and sweep asks cheapest-first."""
+    engine = MatchingEngine()
+    engine.place_limit(Side.ASK, price=100.00, quantity=2)
+    engine.place_limit(Side.ASK, price=105.00, quantity=3)
+    engine.place_limit(Side.ASK, price=200.00, quantity=5)
+
+    report = engine.place_market(Side.BID, quantity=4, actor="user")
+
+    assert [(fill.price, fill.quantity) for fill in report.fills] == [
+        (100.00, 2),
+        (105.00, 2),
+    ]
+    assert report.average_price == 102.50
+
+
 def test_market_session_keeps_user_history() -> None:
     """MarketSession.my_orders should retain filled and cancelled user IDs."""
     session = MarketSession(seed=123)
@@ -137,6 +153,7 @@ def test_low_sell_limit_returns_acknowledgement() -> None:
 def main() -> None:
     tests = [
         test_matching_engine_lifecycle,
+        test_market_buy_uses_best_available_asks,
         test_market_session_keeps_user_history,
         test_low_sell_limit_returns_acknowledgement,
     ]

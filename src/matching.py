@@ -221,6 +221,18 @@ class RestingQueue:
         if order.open_qty == 0:
             del self._orders[order.order_id]
         return order, filled
+
+    def fill_order(self, order_id: int, quantity: int) -> tuple[Order, int] | None:
+        """Fill a known resting order without consuming orders ahead of it."""
+        order = self._orders.get(order_id)
+        if order is None:
+            return None
+        filled = min(quantity, order.open_qty)
+        order.open_qty -= filled
+        self._depth -= filled
+        if order.open_qty == 0:
+            del self._orders[order_id]
+        return order, filled
     
     # cancelling an order
     def withdraw(self, order_id: int) -> Order | None:
@@ -458,6 +470,72 @@ class MatchingEngine:
                 else None
             )
         )
+
+    def place_snapshot_limit(
+        self,
+        side: Side,
+        price: float,
+        quantity: int,
+        actor: str = "replay",
+    ) -> ExecutionReport:
+        """Post recorded liquidity without matching it against shadow orders."""
+        if quantity <= 0:
+            raise ValueError("quantity가 0보다 커야합니다.")
+        order = Order(
+            order_id=next(self._next_id),
+            side=side,
+            order_type=OrderType.LIMIT,
+            original_qty=quantity,
+            open_qty=quantity,
+            limit_ticks=self.scale.to_ticks(price),
+            arrival=next(self._next_arrival),
+            actor=actor,
+            status=OrderStatus.RESTING,
+        )
+        self._order_history[order.order_id] = order
+        self._post(order)
+        return ExecutionReport(
+            order_id=order.order_id,
+            status=OrderStatus.RESTING,
+            fills=[],
+            filled_qty=0,
+            open_qty=quantity,
+            resting_price=self.scale.to_price(order.limit_ticks),
+        )
+
+    def execute_resting_order(
+        self,
+        order_id: int,
+        quantity: int,
+        price: float,
+        taker_side: Side,
+    ) -> Fill | None:
+        """Apply a replay-derived execution to one specific shadow order."""
+        if quantity <= 0:
+            return None
+        order = self._index.get(order_id)
+        if order is None or order.limit_ticks is None:
+            return None
+        book = self.side(order.side)
+        level = book.level(order.limit_ticks)
+        if level is None:
+            return None
+        result = level.fill_order(order_id, quantity)
+        if result is None:
+            return None
+        order, filled = result
+        order.status = OrderStatus.FILLED if order.open_qty == 0 else OrderStatus.PARTIAL
+        if order.open_qty == 0:
+            self._index.pop(order_id, None)
+            book.discard_if_empty(order.limit_ticks)
+        return Fill(
+            price=price,
+            quantity=filled,
+            taker_side=taker_side,
+            resting_id=order_id,
+            incoming_id=0,
+            sequence=next(self._next_seq),
+        )
     
     # placing market order ( NO RESTING !!!)
     def place_market(
@@ -558,6 +636,5 @@ class MatchingEngine:
             contra.discard_if_empty(ticks)
 
         return fills
-
 
 

@@ -8,9 +8,10 @@ const fmtMoney = (n) =>
     ? "—"
     : Number(n).toLocaleString(undefined, {
         style: "currency",
-        currency: "USD",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
+        currency: "KRW",
+        currencyDisplay: "symbol",
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
       });
 
 const SIDE_PRESENTATION = Object.freeze({
@@ -330,8 +331,11 @@ function renderPortfolio(portfolio = {}) {
   document.getElementById("portfolio-equity").textContent = fmtMoney(portfolio.equity);
   document.getElementById("portfolio-cash").textContent = fmtMoney(portfolio.cash);
   document.getElementById("portfolio-inventory").textContent = fmtQty(portfolio.inventory ?? 0);
-  document.getElementById("portfolio-mark").textContent = fmtMoney(portfolio.mark_price);
+  document.getElementById("portfolio-mark").textContent =
+    portfolio.mark_price == null ? "—" : `${fmt(portfolio.mark_price)} pts`;
   document.getElementById("portfolio-inventory-value").textContent = fmtMoney(portfolio.inventory_value);
+  document.getElementById("portfolio-fees").textContent = fmtMoney(portfolio.fees_paid);
+  document.getElementById("portfolio-margin").textContent = fmtMoney(portfolio.initial_margin);
   document.getElementById("portfolio-initial-cash").textContent = fmtMoney(portfolio.initial_cash);
 
   const pnlEl = document.getElementById("portfolio-pnl");
@@ -348,13 +352,31 @@ function renderPortfolio(portfolio = {}) {
   inventoryEl.classList.toggle("negative", inventory < 0);
 }
 
+function renderSource(source = {}, clock = {}) {
+  const isReplay = source.mode === "replay";
+  const badge = document.getElementById("source-badge");
+  badge.textContent = isReplay ? "REAL DATA" : "SYNTH";
+  badge.classList.toggle("is-replay", isReplay);
+  document.getElementById("replay-state").textContent = isReplay
+    ? `${source.orderbook_file}${source.finished ? " · complete" : ""}`
+    : "Synthetic flow";
+  document.getElementById("replay-row").textContent = `Row ${clock.ticks ?? 0}`;
+  document.getElementById("replay-time").textContent = clock.timestamp || "—";
+  const sourceSelect = document.getElementById("replay-file");
+  if (document.activeElement !== sourceSelect) {
+    sourceSelect.value = isReplay ? source.orderbook_file : "__synthetic__";
+  }
+}
+
 function renderStrategy(strategy = {}, top = {}, portfolio = {}) {
   const enabled = !!strategy.enabled;
   const card = document.querySelector(".strategy-card");
   const button = document.getElementById("toggle-strategy");
   const status = document.getElementById("strategy-status");
   const dot = document.getElementById("strategy-dot");
-  const hasQuote = enabled && strategy.bid_price != null && strategy.ask_price != null;
+  const hasBid = enabled && strategy.bid_price != null;
+  const hasAsk = enabled && strategy.ask_price != null;
+  const hasQuote = hasBid || hasAsk;
 
   card.classList.toggle("is-running", enabled);
   button.textContent = enabled ? "Stop" : "Start";
@@ -363,12 +385,13 @@ function renderStrategy(strategy = {}, top = {}, portfolio = {}) {
   dot.classList.toggle("is-running", enabled);
   status.textContent = enabled ? (hasQuote ? "Quoting" : "Starting…") : "Stopped";
 
-  document.getElementById("strategy-bid").textContent = hasQuote ? fmt(strategy.bid_price) : "—";
-  document.getElementById("strategy-ask").textContent = hasQuote ? fmt(strategy.ask_price) : "—";
-  document.getElementById("strategy-spread").textContent = hasQuote
+  document.getElementById("strategy-bid").textContent = hasBid ? fmt(strategy.bid_price) : "LIMIT";
+  document.getElementById("strategy-ask").textContent = hasAsk ? fmt(strategy.ask_price) : "LIMIT";
+  document.getElementById("strategy-spread").textContent = hasBid && hasAsk
     ? fmt(strategy.ask_price - strategy.bid_price)
     : "—";
 
+  document.getElementById("strategy-reference").textContent = fmt(strategy.reference_price);
   document.getElementById("strategy-risk").textContent = strategy.risk_aversion ?? "—";
   document.getElementById("strategy-kappa").textContent = strategy.kappa ?? "—";
   document.getElementById("strategy-volatility").textContent = strategy.volatility ?? "—";
@@ -377,6 +400,14 @@ function renderStrategy(strategy = {}, top = {}, portfolio = {}) {
   document.getElementById("strategy-refresh").textContent = strategy.refresh_interval == null
     ? "—"
     : `${strategy.refresh_interval} ticks`;
+
+  const configForm = document.getElementById("strategy-config-form");
+  if (document.activeElement?.form !== configForm) {
+    configForm.elements.fair_value_source.value = strategy.fair_value_source || "mid";
+    configForm.elements.risk_aversion.value = strategy.risk_aversion ?? "";
+    configForm.elements.kappa.value = strategy.kappa ?? "";
+    configForm.elements.order_quantity.value = strategy.order_quantity ?? "";
+  }
 
   const biasEl = document.getElementById("strategy-bias");
   if (!enabled) {
@@ -469,6 +500,7 @@ function syncControls(s) {
   const urg = Math.round(Number(s.urgency) || 0);
   document.getElementById("urgency").value = urg;
   document.getElementById("urgency-val").textContent = urg;
+  document.getElementById("urgency").disabled = s.source?.mode === "replay";
 }
 
 function renderSnapshot(s) {
@@ -489,6 +521,7 @@ function renderSnapshot(s) {
   drawDepthChart(book, top, activeOrders);
   renderPrintsTicker(s.prints);
   renderPortfolio(s.portfolio);
+  renderSource(s.source, s.clock);
   renderStrategy(s.strategy, top, s.portfolio);
   renderMyOrders(activeOrders);
   renderFinishedOrders(finishedOrders);
@@ -527,7 +560,10 @@ async function submitOrder(body) {
     setStatus(result.reason || "Rejected", true);
   } else {
     newestOrderId = result.open > 0 ? result.order_id : null;
-    setStatus(`Order ${result.order_id}: ${result.status}, filled ${result.filled}, open ${result.open}`);
+    const execution = result.average_price == null
+      ? "no execution"
+      : `average execution ${fmt(result.average_price)}`;
+    setStatus(`Order ${result.order_id}: ${result.status}, filled ${result.filled}, open ${result.open}, ${execution}`);
   }
   await refresh();
 }
@@ -562,6 +598,23 @@ document.getElementById("order-form").addEventListener("submit", (ev) => {
   submitOrder(body).catch((e) => setStatus(e.message, true));
 });
 
+function syncOrderTypeFields() {
+  const orderType = document.querySelector('input[name="order_type"]:checked')?.value;
+  const priceInput = document.querySelector('#order-form input[name="price"]');
+  const isMarket = orderType === "market";
+  priceInput.disabled = isMarket;
+  priceInput.setAttribute("aria-disabled", String(isMarket));
+  document.getElementById("price-label").textContent = isMarket ? "Price (market)" : "Limit Price";
+  priceInput.title = isMarket
+    ? "Market orders execute against the best available opposite-side prices."
+    : "Maximum buy price or minimum sell price.";
+}
+
+document.querySelectorAll('input[name="order_type"]').forEach((radio) => {
+  radio.addEventListener("change", syncOrderTypeFields);
+});
+syncOrderTypeFields();
+
 document.getElementById("ack-dialog").addEventListener("close", () => {
   if (document.getElementById("ack-dialog").returnValue !== "confirm" || !pendingSubmit) {
     pendingSubmit = null;
@@ -592,6 +645,80 @@ document.getElementById("toggle-strategy").addEventListener("click", async () =>
     setStatus(e.message, true);
   } finally {
     button.disabled = false;
+  }
+});
+
+document.getElementById("strategy-config-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const button = form.querySelector("button");
+  button.disabled = true;
+  try {
+    await api("/api/strategy/configure", {
+      method: "POST",
+      body: JSON.stringify({
+        fair_value_source: data.get("fair_value_source"),
+        risk_aversion: Number(data.get("risk_aversion")),
+        kappa: Number(data.get("kappa")),
+        order_quantity: Number(data.get("order_quantity")),
+      }),
+    });
+    setStatus("A–S model settings applied");
+    await refresh();
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function initializeReplayFiles() {
+  const result = await api("/api/replay/files");
+  const select = document.getElementById("replay-file");
+  select.innerHTML = "";
+  const synthetic = document.createElement("option");
+  synthetic.value = "__synthetic__";
+  synthetic.textContent = "Synthetic simulator";
+  select.appendChild(synthetic);
+  for (const file of result.files || []) {
+    const option = document.createElement("option");
+    option.value = file.orderbook_file;
+    const date = file.orderbook_file.match(/\d{8}/)?.[0] || file.orderbook_file;
+    option.textContent = `${date} · ${file.trades_file ? "book + trades" : "book only"}`;
+    select.appendChild(option);
+  }
+}
+
+document.getElementById("replay-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const select = document.getElementById("replay-file");
+  if (!select.value) return;
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  button.textContent = "Switching…";
+  try {
+    const isSynthetic = select.value === "__synthetic__";
+    if (isSynthetic) {
+      await api("/api/replay/synthetic", { method: "POST" });
+    } else {
+      await api("/api/replay/load", {
+        method: "POST",
+        body: JSON.stringify({ orderbook_file: select.value }),
+      });
+    }
+    selectedOrderId = null;
+    newestOrderId = null;
+    lastRenderedSnapshot = null;
+    setStatus(isSynthetic
+      ? "Synthetic simulator loaded. Start A–S to begin."
+      : "Real market-data replay loaded. Start A–S to begin.");
+    await refresh();
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Switch Source";
   }
 });
 
@@ -648,4 +775,7 @@ function startPoll() {
 }
 
 initializePanelResizer();
-refresh().then(startPoll);
+Promise.all([initializeReplayFiles(), refresh()]).then(startPoll).catch((error) => {
+  setStatus(error.message, true);
+  startPoll();
+});

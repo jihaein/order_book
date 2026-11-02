@@ -5,6 +5,7 @@ from time import strftime
 from dataclasses import dataclass, field
 from strategies.avellaneda_stoikov import ASParameters
 from strategies.as_market_maker import ASMarketMaker
+from replay import MarketDataReplay
 
 @dataclass(frozen=True)
 class BandVerdict:
@@ -12,10 +13,24 @@ class BandVerdict:
     price: float
     reason: str = ""
 
+
+@dataclass(frozen=True)
+class TradingRules:
+    max_order_quantity: int = 2_000
+    inventory_limit: int = 100
+    fee_rate: float = 0.00003
+    contract_multiplier: int = 250_000
+    initial_margin_rate: float = 0.2175
+    maintenance_margin_rate: float = 0.145
+
 class MarketSession:
-    def __init__(self, scale: TickScale | None = None, seed: int | None = None, initial_cash: float = 1_000_000.0) -> None:
+    def __init__(self, scale: TickScale | None = None, seed: int | None = None, initial_cash: float = 1_000_000_000.0) -> None:
         self.engine = MatchingEngine(scale)
+        self.synthetic_seed = seed
         self.flow = FlowGenerator(self.engine, FlowSettings(seed=seed))
+        self.source_mode = "synthetic"
+        self.replay_orderbook_path = None
+        self.replay_trades_path = None
         self.live: bool = False
         self.tempo: int = 4
         PRINT_HISTORY = 100
@@ -30,11 +45,14 @@ class MarketSession:
         self.initial_cash = float(initial_cash)
         self.cash = float(initial_cash)
         self.inventory = 0
+        self.rules = TradingRules()
+        self.fees_paid = 0.0
 
         # AS Model
         self.strategy_enabled = False
         self.strategy_volatility = 0.05
         self.strategy_refresh_interval = 10
+        self.strategy_fair_value_source = "mid"
         self.strategy_order_ids: set[int] = set()
         self._last_strategy_refresh_tick: int | None = None
         self.market_maker = ASMarketMaker(
@@ -76,25 +94,39 @@ class MarketSession:
         ):
             return
 
-        mid_price = self.engine.mid()
-        if mid_price is None:
+        reference_price = self.strategy_reference_price()
+        if reference_price is None:
             return
 
+        bid_quantity = min(
+            self.market_maker.order_quantity,
+            max(0, self.rules.inventory_limit - self.inventory),
+        )
+        ask_quantity = min(
+            self.market_maker.order_quantity,
+            max(0, self.rules.inventory_limit + self.inventory),
+        )
+
         bid_report, ask_report = self.market_maker.refresh(
-            mid_price=mid_price,
+            mid_price=reference_price,
             inventory=self.inventory,
             volatility=self.strategy_volatility,
             current_tick=current_tick,
+            bid_quantity=bid_quantity,
+            ask_quantity=ask_quantity,
         )
 
-        self.my_orders.add(bid_report.order_id)
-        self.my_orders.add(ask_report.order_id)
-        self.strategy_order_ids.add(bid_report.order_id)
-        self.strategy_order_ids.add(ask_report.order_id)
+        for report in (bid_report, ask_report):
+            if report is None:
+                continue
+            self.my_orders.add(report.order_id)
+            self.strategy_order_ids.add(report.order_id)
+            if hasattr(self.flow, "register_shadow_order"):
+                self.flow.register_shadow_order(report.order_id)
         self._last_strategy_refresh_tick = current_tick
 
-        self._process_fills(bid_report.fills)
-        self._process_fills(ask_report.fills)
+        self._process_fills(bid_report.fills if bid_report is not None else [])
+        self._process_fills(ask_report.fills if ask_report is not None else [])
 
 
 
@@ -104,7 +136,10 @@ class MarketSession:
     def _apply_user_execution(self, side: Side, price: float, quantity: int) -> None: 
         signed_quantity = side.sign * quantity
         self.inventory += signed_quantity
-        self.cash -= signed_quantity * price
+        traded_notional = price * quantity * self.rules.contract_multiplier
+        fee = traded_notional * self.rules.fee_rate
+        self.cash -= signed_quantity * price * self.rules.contract_multiplier + fee
+        self.fees_paid += fee
         return None
     
     # 2) if incoming / resting order belongs to user, apply execution 
@@ -143,13 +178,16 @@ class MarketSession:
         mark_price = self.anchor_price()
 
         # inventory value
-        inventory_value = self.inventory * mark_price
+        inventory_value = self.inventory * mark_price * self.rules.contract_multiplier
 
         # equity
         equity = self.cash + inventory_value
 
         # total mark to market p&l (profit and loss)
         pnl = equity - self.initial_cash
+        position_notional = abs(inventory_value)
+        initial_margin = position_notional * self.rules.initial_margin_rate
+        maintenance_margin = position_notional * self.rules.maintenance_margin_rate
 
         return {
             "initial_cash": self.initial_cash,
@@ -158,7 +196,15 @@ class MarketSession:
             "mark_price": mark_price,
             "inventory_value": inventory_value,
             "equity": equity,
-            "pnl": pnl
+            "pnl": pnl,
+            "fees_paid": self.fees_paid,
+            "position_notional": position_notional,
+            "initial_margin": initial_margin,
+            "maintenance_margin": maintenance_margin,
+            "margin_excess": equity - initial_margin,
+            "margin_status": "ok" if equity >= maintenance_margin else "margin_call",
+            "currency": "KRW",
+            "contract_multiplier": self.rules.contract_multiplier,
         }
             
 
@@ -169,14 +215,10 @@ class MarketSession:
         fills = self.flow.advance(ticks)
         self._process_fills(fills)
         self._refresh_strategy()
+        if getattr(self.flow, "finished", False):
+            self.live = False
 
-    
-    def restart(self) -> None:
-        self.engine.reset()
-        self.flow = FlowGenerator(
-            self.engine,
-            FlowSettings(seed=self.flow.settings.seed)
-        )
+    def _reset_session_state(self) -> None:
         self.market_maker.cancel_active_quotes()
         self.strategy_enabled = False
         self._last_strategy_refresh_tick = None
@@ -189,8 +231,60 @@ class MarketSession:
         self.last_print = None
         self.cash = self.initial_cash
         self.inventory = 0
+        self.fees_paid = 0.0
+
+    def load_replay(self, orderbook_path, trades_path=None) -> None:
+        if hasattr(self.flow, "close"):
+            self.flow.close()
+        self.market_maker.cancel_active_quotes()
+        self.engine.reset()
+        self.source_mode = "replay"
+        self.replay_orderbook_path = orderbook_path
+        self.replay_trades_path = trades_path
+        self.flow = MarketDataReplay(self.engine, orderbook_path, trades_path)
+        self.live = False
+        self._reset_session_state()
         fills = self.flow.advance()
-        self._record(fills)
+        self._process_fills(fills)
+
+    def load_synthetic(self) -> None:
+        if hasattr(self.flow, "close"):
+            self.flow.close()
+        self.market_maker.cancel_active_quotes()
+        self.engine.reset()
+        self.source_mode = "synthetic"
+        self.replay_orderbook_path = None
+        self.replay_trades_path = None
+        self.flow = FlowGenerator(
+            self.engine,
+            FlowSettings(seed=self.synthetic_seed),
+        )
+        self.live = False
+        self._reset_session_state()
+        fills = self.flow.advance()
+        self._process_fills(fills)
+
+    def restart(self) -> None:
+        if hasattr(self.flow, "close"):
+            self.flow.close()
+        self.market_maker.cancel_active_quotes()
+        self.engine.reset()
+        if self.source_mode == "replay" and self.replay_orderbook_path is not None:
+            self.flow = MarketDataReplay(
+                self.engine,
+                self.replay_orderbook_path,
+                self.replay_trades_path,
+            )
+        else:
+            self.flow = FlowGenerator(
+                self.engine,
+                FlowSettings(seed=self.synthetic_seed)
+            )
+        self.live = False
+        self._reset_session_state()
+        self.fees_paid = 0.0
+        fills = self.flow.advance()
+        self._process_fills(fills)
     
     
     def configure(self, live=None, tempo=None, urgency=None) -> None:
@@ -208,6 +302,63 @@ class MarketSession:
         if mid is not None: return mid
         if self.last_print is not None: return self.last_print
         return self.flow.fair_value.value
+
+    def microprice(self) -> float | None:
+        if self.source_mode == "replay" and hasattr(self.flow, "market_microprice"):
+            return self.flow.market_microprice()
+        bids = self.engine.ladder(Side.BID, 1)
+        asks = self.engine.ladder(Side.ASK, 1)
+        if not bids or not asks:
+            return None
+        bid_price, bid_quantity = bids[0]
+        ask_price, ask_quantity = asks[0]
+        total_quantity = bid_quantity + ask_quantity
+        if total_quantity <= 0:
+            return None
+        return (
+            ask_price * bid_quantity + bid_price * ask_quantity
+        ) / total_quantity
+
+    def strategy_reference_price(self) -> float | None:
+        if self.strategy_fair_value_source == "micro":
+            return self.microprice()
+        if self.strategy_fair_value_source == "theoretical":
+            return self.flow.fair_value.value
+        if self.source_mode == "replay":
+            if self.flow.market_best_bid is None or self.flow.market_best_ask is None:
+                return None
+            return (self.flow.market_best_bid + self.flow.market_best_ask) / 2
+        return self.engine.mid()
+
+    def configure_strategy(
+        self,
+        fair_value_source: str | None = None,
+        risk_aversion: float | None = None,
+        kappa: float | None = None,
+        order_quantity: int | None = None,
+    ) -> None:
+        if fair_value_source is not None:
+            if fair_value_source not in {"mid", "micro", "theoretical"}:
+                raise ValueError("fair_value_source must be mid, micro, or theoretical")
+            self.strategy_fair_value_source = fair_value_source
+        if risk_aversion is not None or kappa is not None:
+            self.market_maker.parameters = ASParameters(
+                risk_aversion=(
+                    risk_aversion
+                    if risk_aversion is not None
+                    else self.market_maker.parameters.risk_aversion
+                ),
+                kappa=(
+                    kappa
+                    if kappa is not None
+                    else self.market_maker.parameters.kappa
+                ),
+                target_inventory=self.market_maker.parameters.target_inventory,
+            )
+        if order_quantity is not None:
+            if order_quantity > self.rules.max_order_quantity:
+                raise ValueError("order quantity exceeds the per-order limit")
+            self.market_maker.order_quantity = order_quantity
     
     def vet_limit(self, side: Side, price: float) -> BandVerdict:
         ref = self.anchor_price()
@@ -242,6 +393,24 @@ class MarketSession:
             return{
                 "outcome": "rejected",
                 "reason": "수량이 0보다 커야합니다."
+            }
+        if quantity > self.rules.max_order_quantity:
+            return {
+                "outcome": "rejected",
+                "reason": f"1회 주문 수량은 {self.rules.max_order_quantity:,}개를 초과할 수 없습니다.",
+            }
+        inventory_headroom = (
+            self.rules.inventory_limit - self.inventory
+            if side is Side.BID
+            else self.rules.inventory_limit + self.inventory
+        )
+        if quantity > inventory_headroom:
+            return {
+                "outcome": "rejected",
+                "reason": (
+                    f"포지션 한도 ±{self.rules.inventory_limit}을 초과합니다. "
+                    f"현재 재고 {self.inventory}, 최대 가능 수량 {max(0, inventory_headroom)}."
+                ),
             }
         
         if order_type is OrderType.MARKET:
@@ -285,6 +454,8 @@ class MarketSession:
         self._process_fills(report.fills)
 
         self.my_orders.add(report.order_id)
+        if hasattr(self.flow, "register_shadow_order"):
+            self.flow.register_shadow_order(report.order_id)
 
         return {
             "outcome": "accepted",
@@ -324,10 +495,27 @@ class MarketSession:
     
     def snapshot(self, depth: int = 10) -> dict:
         
-        best_bid = self.engine.best_bid()
-        best_ask = self.engine.best_ask()
-        mid = self.engine.mid()
-        spread = self.engine.spread()
+        if self.source_mode == "replay":
+            best_bid = self.flow.market_best_bid
+            best_ask = self.flow.market_best_ask
+            mid = (
+                (best_bid + best_ask) / 2
+                if best_bid is not None and best_ask is not None else None
+            )
+            spread = (
+                round(best_ask - best_bid, 10)
+                if best_bid is not None and best_ask is not None else None
+            )
+        else:
+            best_bid = self.engine.best_bid()
+            best_ask = self.engine.best_ask()
+            mid = self.engine.mid()
+            spread = self.engine.spread()
+        market_last = (
+            getattr(self.flow, "last_price", None)
+            if self.source_mode == "replay"
+            else self.last_print
+        )
 
         bids = self.engine.ladder(Side.BID, depth)
         asks = self.engine.ladder(Side.ASK, depth)
@@ -375,6 +563,20 @@ class MarketSession:
 
             "clock": {
                 "ticks": self.flow.ticks_elapsed,
+                "timestamp": getattr(self.flow, "current_timestamp", None),
+            },
+
+            "source": {
+                "mode": self.source_mode,
+                "orderbook_file": (
+                    self.replay_orderbook_path.name
+                    if self.replay_orderbook_path is not None else None
+                ),
+                "trades_file": (
+                    self.replay_trades_path.name
+                    if self.replay_trades_path is not None else None
+                ),
+                "finished": getattr(self.flow, "finished", False),
             },
 
             "portfolio": self.portfolio_snapshot(),
@@ -385,7 +587,7 @@ class MarketSession:
                 "mid": mid,
                 "spread": spread,
                 "fair_value": self.flow.fair_value.value,
-                "last_print": self.last_print,
+                "last_print": market_last,
             },
 
             "strategy": {
@@ -395,6 +597,8 @@ class MarketSession:
                 "kappa": self.market_maker.parameters.kappa,
                 "order_quantity": self.market_maker.order_quantity,
                 "target_inventory": self.market_maker.parameters.target_inventory,
+                "fair_value_source": self.strategy_fair_value_source,
+                "reference_price": self.strategy_reference_price(),
                 "refresh_interval": self.strategy_refresh_interval,
                 "total_ticks": self.market_maker.total_ticks,
                 "remaining_time": self.market_maker.remaining_time(self.flow.ticks_elapsed),
@@ -402,14 +606,23 @@ class MarketSession:
                 "active_ask_id": self.market_maker.active_ask_id,
                 "bid_price": (
                     strategy_quote.bid_price
-                    if strategy_quote is not None
+                    if strategy_quote is not None and self.market_maker.active_bid_id is not None
                     else None
                 ),
                 "ask_price": (
                     strategy_quote.ask_price
-                    if strategy_quote is not None
+                    if strategy_quote is not None and self.market_maker.active_ask_id is not None
                     else None
                 ),
+            },
+
+            "rules": {
+                "max_order_quantity": self.rules.max_order_quantity,
+                "inventory_limit": self.rules.inventory_limit,
+                "fee_rate": self.rules.fee_rate,
+                "contract_multiplier": self.rules.contract_multiplier,
+                "initial_margin_rate": self.rules.initial_margin_rate,
+                "maintenance_margin_rate": self.rules.maintenance_margin_rate,
             },
             
             "book": {

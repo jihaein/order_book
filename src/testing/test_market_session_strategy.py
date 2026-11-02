@@ -205,10 +205,59 @@ def test_process_fills_updates_portfolio() -> None:
     assert session.inventory == initial_inventory + 2
     assert math.isclose(
         session.cash,
-        initial_cash - 200.0,
+        initial_cash
+        - (200.0 * session.rules.contract_multiplier)
+        - (200.0 * session.rules.contract_multiplier * session.rules.fee_rate),
         rel_tol=1e-9,
         abs_tol=1e-9,
     )
+    assert math.isclose(
+        session.fees_paid,
+        200.0 * session.rules.contract_multiplier * session.rules.fee_rate,
+    )
+    portfolio = session.portfolio_snapshot()
+    assert portfolio["currency"] == "KRW"
+    assert portfolio["contract_multiplier"] == 250_000
+    assert math.isclose(portfolio["inventory_value"], 2 * 100.0 * 250_000)
+    assert math.isclose(portfolio["pnl"], -portfolio["fees_paid"])
+
+
+def test_strategy_reference_price_modes() -> None:
+    session = MarketSession(seed=123)
+    session.engine.reset()
+    session.engine.place_limit(Side.BID, 99.0, 30)
+    session.engine.place_limit(Side.ASK, 101.0, 10)
+
+    session.configure_strategy(fair_value_source="mid")
+    assert session.strategy_reference_price() == 100.0
+
+    session.configure_strategy(fair_value_source="micro")
+    assert session.strategy_reference_price() == 100.5
+
+    session.configure_strategy(fair_value_source="theoretical")
+    assert session.strategy_reference_price() == session.flow.fair_value.value
+
+
+def test_order_and_inventory_limits() -> None:
+    session = MarketSession(seed=123)
+    too_large = session.submit(Side.BID, OrderType.MARKET, 2_001)
+    assert too_large["outcome"] == "rejected"
+
+    session.inventory = 95
+    over_position_limit = session.submit(Side.BID, OrderType.MARKET, 6)
+    assert over_position_limit["outcome"] == "rejected"
+    assert "±100" in over_position_limit["reason"]
+
+
+def test_strategy_disables_risk_increasing_side_at_limit() -> None:
+    session = MarketSession(seed=123)
+    session.inventory = session.rules.inventory_limit
+    session.configure(live=True)
+    session.start_strategy()
+    session.advance(1)
+
+    assert session.market_maker.active_bid_id is None
+    assert session.market_maker.active_ask_id is not None
 
 
 def test_restart_resets_strategy() -> None:
@@ -251,6 +300,9 @@ if __name__ == "__main__":
         test_stop_cancels_active_quotes,
         test_snapshot_contains_strategy_state,
         test_process_fills_updates_portfolio,
+        test_strategy_reference_price_modes,
+        test_order_and_inventory_limits,
+        test_strategy_disables_risk_increasing_side_at_limit,
         test_restart_resets_strategy,
     ]
 

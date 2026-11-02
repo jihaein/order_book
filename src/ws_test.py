@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-# KOSPI 200 코드 (.mtx 파일에서 찾음)
+# KOSPI 200
 FUTURES_CODE = "A01612"
 DATA_DIR = REPO_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,23 +44,40 @@ STREAM_NAMES = {
     "H0IFASP0": "011",
 }
 
-
 def main():
-    # 인증
-    ka.auth(svr="prod")
-    ka.auth_ws()
+    try:
+        print("1. Starting REST authentication...", flush=True)
+        ka.auth(svr="prod")
+        print("2. REST authentication complete", flush=True)
 
-    # Create WebSocket
-    kws = ka.KISWebSocket(api_url="/tryitout")
+        print("3. Starting WebSocket authentication...", flush=True)
+        ka.auth_ws()
+        print("4. WebSocket authentication complete", flush=True)
 
-    # [국내선물옵션] 실시간시세 > 지수선물 실시간체결가[실시간-010]
-    kws.subscribe(request=index_futures_realtime_conclusion, data=[FUTURES_CODE])
+        print("5. Creating WebSocket client...", flush=True)
+        kws = ka.KISWebSocket(api_url="/tryitout")
 
-    # [국내선물옵션] 실시간시세 > 지수선물 실시간호가[실시간-011]
-    kws.subscribe(request=index_futures_realtime_quote, data=[FUTURES_CODE])
+        print(
+            f"6. Registering subscriptions for {FUTURES_CODE}...",
+            flush=True,
+        )
 
-    kws.start(on_result=on_result)
+        kws.subscribe(
+            request=index_futures_realtime_conclusion,
+            data=[FUTURES_CODE],
+        )
 
+        kws.subscribe(
+            request=index_futures_realtime_quote,
+            data=[FUTURES_CODE],
+        )
+
+        print("7. Starting WebSocket — waiting for data...", flush=True)
+        kws.start(on_result=on_result)
+
+    except Exception:
+        logger.exception("WebSocket collector failed")
+        raise
 
 def on_result(ws, tr_id, result, data_info):
     received_at = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -74,7 +91,7 @@ def on_result(ws, tr_id, result, data_info):
     rows.insert(0, "received_at", received_at.isoformat(timespec="milliseconds"))
 
     date_text = received_at.strftime("%Y%m%d")
-    output_file = DATA_DIR / f"{date_text}_{stream_name}_09_23.csv"
+    output_file = DATA_DIR / f"{date_text}_{stream_name}_09_29.csv"
 
     write_header = not output_file.exists()
 
@@ -89,3 +106,4 @@ def on_result(ws, tr_id, result, data_info):
 
 if __name__ == "__main__":
     main()
+

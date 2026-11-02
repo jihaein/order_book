@@ -9,6 +9,7 @@ from market_session import MarketSession
 from matching import OrderType, Side
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 app = FastAPI(title="Orderbook")
 session = MarketSession(seed=3)
@@ -34,6 +35,17 @@ class SubmitBody(BaseModel):
 
 class StrategyBody(BaseModel):
     enabled: bool
+
+
+class StrategyConfigBody(BaseModel):
+    fair_value_source: str | None = None
+    risk_aversion: float | None = Field(default=None, gt=0)
+    kappa: float | None = Field(default=None, gt=0)
+    order_quantity: int | None = Field(default=None, ge=1, le=2_000)
+
+
+class ReplayLoadBody(BaseModel):
+    orderbook_file: str
 
 
 def _parse_side(value: str) -> Side:
@@ -77,6 +89,50 @@ def restart() -> dict:
     return {"ok": True}
 
 
+@app.get("/api/replay/files")
+def replay_files() -> dict:
+    files = []
+    for orderbook_path in sorted(DATA_DIR.glob("*.csv")):
+        if "_011" not in orderbook_path.name:
+            continue
+        trades_name = orderbook_path.name.replace("_011", "_010", 1)
+        trades_path = DATA_DIR / trades_name
+        files.append({
+            "orderbook_file": orderbook_path.name,
+            "trades_file": trades_name if trades_path.exists() else None,
+            "size_bytes": orderbook_path.stat().st_size,
+        })
+    return {"files": files}
+
+
+@app.post("/api/replay/load")
+def load_replay(body: ReplayLoadBody) -> dict:
+    allowed = {
+        path.name: path
+        for path in DATA_DIR.glob("*.csv")
+        if "_011" in path.name
+    }
+    orderbook_path = allowed.get(body.orderbook_file)
+    if orderbook_path is None:
+        raise HTTPException(status_code=404, detail="order-book replay file not found")
+    trades_path = DATA_DIR / orderbook_path.name.replace("_011", "_010", 1)
+    session.load_replay(
+        orderbook_path,
+        trades_path if trades_path.exists() else None,
+    )
+    return {
+        "ok": True,
+        "orderbook_file": orderbook_path.name,
+        "trades_file": trades_path.name if trades_path.exists() else None,
+    }
+
+
+@app.post("/api/replay/synthetic")
+def load_synthetic() -> dict:
+    session.load_synthetic()
+    return {"ok": True, "mode": "synthetic"}
+
+
 @app.post("/api/strategy")
 def strategy(body: StrategyBody) -> dict:
     if body.enabled:
@@ -84,6 +140,20 @@ def strategy(body: StrategyBody) -> dict:
     else:
         session.stop_strategy()
     return {"ok": True, "enabled": session.strategy_enabled}
+
+
+@app.post("/api/strategy/configure")
+def configure_strategy(body: StrategyConfigBody) -> dict:
+    try:
+        session.configure_strategy(
+            fair_value_source=body.fair_value_source,
+            risk_aversion=body.risk_aversion,
+            kappa=body.kappa,
+            order_quantity=body.order_quantity,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
 
 
 @app.post("/api/submit")

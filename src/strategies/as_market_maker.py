@@ -90,34 +90,51 @@ class ASMarketMaker:
 
         return executable_quote
     
-    def refresh(self, mid_price: float, inventory: int, volatility: float, current_tick: int,):
+    def refresh(
+            self,
+            mid_price: float,
+            inventory: int,
+            volatility: float,
+            current_tick: int,
+            bid_quantity: int | None = None,
+            ask_quantity: int | None = None,
+    ):
         # calculate the new executable quote 
         quote = self.calculate_executable_quote(mid_price, inventory, volatility, current_tick)
         self.last_quote = quote
         # cancel the previous bid and ask
         self.cancel_active_quotes()
 
-        # submit the new bid/ask limit order
-        bid_report = self.engine.place_limit(
-            side=Side.BID,
-            price=quote.bid_price,
-            quantity=self.order_quantity, 
-            actor="user",
+        bid_size = self.order_quantity if bid_quantity is None else bid_quantity
+        ask_size = self.order_quantity if ask_quantity is None else ask_quantity
+
+        # At an inventory boundary one side can be disabled without stopping the strategy.
+        bid_report = (
+            self.engine.place_limit(
+                side=Side.BID,
+                price=quote.bid_price,
+                quantity=bid_size,
+                actor="user",
+            )
+            if bid_size > 0 else None
         )
 
-        ask_report = self.engine.place_limit(
-            side=Side.ASK,
-            price=quote.ask_price,
-            quantity=self.order_quantity, 
-            actor="user",
+        ask_report = (
+            self.engine.place_limit(
+                side=Side.ASK,
+                price=quote.ask_price,
+                quantity=ask_size,
+                actor="user",
+            )
+            if ask_size > 0 else None
         )
 
-        if self.engine.find(bid_report.order_id) is not None:
+        if bid_report is not None and self.engine.find(bid_report.order_id) is not None:
             self.active_bid_id = bid_report.order_id
         else: 
             self.active_bid_id = None
 
-        if self.engine.find(ask_report.order_id) is not None:
+        if ask_report is not None and self.engine.find(ask_report.order_id) is not None:
             self.active_ask_id = ask_report.order_id
         else: 
             self.active_ask_id = None

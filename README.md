@@ -37,6 +37,19 @@ Market Agents
 Fair Value (FV)
 - random walk used for simulating fair value: S(t+1) = S(t) + drift + noise.
 
+### Replaying Collected Market Data
+
+The UI can switch freely between the original synthetic simulator and collected
+KIS feeds from `data/` without modifying them. Select a source in **Market Data
+Replay**, click **Switch Source**, configure the
+A–S model, then click **Start**. The replay pairs each `_011.csv` five-level
+order-book file with the corresponding `_010.csv` trade/theoretical-price file
+by timestamp. The speed control determines how many recorded book rows advance
+per UI update.
+
+Available A–S reference prices are midpoint, level-one microprice, and the KIS
+`hts_thpr` theoretical price. Reset rewinds the selected replay to its first row.
+
 DISCLAIMER: I implemented @romanmichaelpaolucci's market_sim.py algorithm into my project (flow.py simulation)
 
 matching.py
